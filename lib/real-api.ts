@@ -108,21 +108,10 @@ export async function getUserPasses(
   return data.passes ?? [];
 }
 
-/** "Today's players" — Real caps this at a curated top-N for the session
- * account (observed: 5 cards, and the `cohort` param is ignored server-side,
- * so pagination would just duplicate the same page). Single call + dedupe. */
-export async function getTodaysPasses(
-  sport: Sport,
-  day: string
-): Promise<UserPass[]> {
-  const data = await realFetch<{ userPasses: UserPass[] }>(
-    `/home/${sport}/boostcontrol?cohort=0&day=${day}`
-  );
-  const seen = new Set<number>();
-  return (data.userPasses ?? []).filter((p) =>
-    seen.has(p.id) ? false : (seen.add(p.id), true)
-  );
-}
+/** Removed getTodaysPasses: boostcontrol's top-5 list is a fixed curated set
+ * (ignores day/cohort/offset params), not "who plays today". "Playing today"
+ * is now computed in the route by joining the full collection with the
+ * schedule. */
 
 /** Booster inventory is account-wide, not card-specific — any owned passId
  * works as the URL anchor. */

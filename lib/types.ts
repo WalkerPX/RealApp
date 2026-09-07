@@ -22,16 +22,17 @@ export interface RealUser {
 }
 
 export interface PassEntity {
-  id: number;
-  sport: string;
-  teamId: number;
-  avatar: string;
-  firstName: string;
-  lastName: string;
-  displayName: string;
-  injuryStatus: string;
-  jersey: number;
-  backgroundColor: string;
+  id: number; // player passes: player id; team passes: team id
+  sport?: string;
+  teamId?: number; // player passes only
+  name?: string; // team passes only
+  displayName?: string;
+  avatar?: string;
+  firstName?: string;
+  lastName?: string;
+  injuryStatus?: string;
+  jersey?: number;
+  backgroundColor?: string;
 }
 
 export interface BoosterInfo {
@@ -52,7 +53,7 @@ export interface UserPass {
   id: number; // pass id — anchors userpassboostercards/...
   userId: string;
   sport: Sport | string;
-  entityType: string;
+  entityType: "player" | "team" | string;
   entityId: number;
   label: string;
   detail?: string;

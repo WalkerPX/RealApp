@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getBoosterInventory,
-  getTodaysPasses,
   getTodaysSchedule,
   getUserPasses,
   searchUsers,
@@ -23,10 +22,16 @@ function todayET(): string {
   }).format(new Date());
 }
 
+/** Team id for a pass: player passes carry entity.teamId, team passes carry
+ * the team id in entity.id. */
+function teamIdOf(pass: { entityType: string; entity: { teamId?: number; id: number } }): number {
+  return pass.entityType === "team" ? pass.entity.id : (pass.entity.teamId ?? 0);
+}
+
 export async function GET(req: NextRequest) {
   const username = req.nextUrl.searchParams.get("username")?.trim();
   const sportRaw = req.nextUrl.searchParams.get("sport") ?? "mlb";
-  const sport = (sportRaw.toLowerCase() as Sport);
+  const sport = sportRaw.toLowerCase() as Sport;
 
   if (!username) {
     return NextResponse.json({ error: "Missing username" }, { status: 400 });
@@ -53,22 +58,21 @@ export async function GET(req: NextRequest) {
     const day = todayET();
     const season = new Date().getFullYear();
 
-    const [allPasses, todaysPasses, schedule] = await Promise.all([
+    const [allPasses, schedule] = await Promise.all([
       getUserPasses(user.id, sport, season),
-      getTodaysPasses(sport, day),
       getTodaysSchedule(sport),
     ]);
 
-    // boostcontrol is scoped to the session's own account, so intersect with
-    // the looked-up user's full collection to keep the dashboard honest.
-    const ownedIds = new Set(allPasses.map((p) => p.id));
-    const playingToday = todaysPasses.filter((p) => ownedIds.has(p.id));
-
+    // "Playing today" = owned cards whose team has a game today. The
+    // collection endpoint carries full per-card boost state, so this is a
+    // complete view (boostcontrol's own "today" list is a fixed top-5 that
+    // ignores day/paging params — not usable as the source of truth).
     const teamsById = new Map<number, (typeof schedule)[number]>();
     for (const game of schedule) {
       teamsById.set(game.homeTeamId, game);
       teamsById.set(game.awayTeamId, game);
     }
+    const playingToday = allPasses.filter((p) => teamsById.has(teamIdOf(p)));
 
     let suggestion = null;
     if (playingToday.length > 0) {
@@ -78,9 +82,9 @@ export async function GET(req: NextRequest) {
 
     const cards: DashboardCard[] = playingToday
       .map((pass) => {
-        const game = teamsById.get(pass.entity.teamId) ?? null;
+        const game = teamsById.get(teamIdOf(pass)) ?? null;
         const opponent = game
-          ? game.homeTeamId === pass.entity.teamId
+          ? game.homeTeamId === teamIdOf(pass)
             ? game.awayTeam
             : game.homeTeam
           : null;
@@ -91,8 +95,7 @@ export async function GET(req: NextRequest) {
           suggestedBooster: pass.boostInfo.isCardBoosted ? null : suggestion,
         };
       })
-      // Unboosted cards first (those are the actionable ones), then biggest
-      // earners first.
+      // Unboosted cards first (actionable), then biggest earners first.
       .sort((a, b) => {
         if (a.pass.boostInfo.isCardBoosted !== b.pass.boostInfo.isCardBoosted) {
           return a.pass.boostInfo.isCardBoosted ? 1 : -1;

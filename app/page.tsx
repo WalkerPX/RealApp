@@ -107,14 +107,22 @@ export default function Page() {
 
           {data.cards.length === 0 ? (
             <p className="empty">
-              No owned cards playing today. (boostcontrol is scoped to the account whose
-              session walkr uses — full overlap only for that user&apos;s own username.)
+              No owned {data.sport.toUpperCase()} cards playing today — check back on a
+              game day.
             </p>
           ) : (
             <div className="grid">
               {data.cards.map((c) => {
                 const { pass } = c;
-                const own = c.game ? teamName(c.game, pass.entity.teamId) : null;
+                const passTeamId =
+                  pass.entityType === "team"
+                    ? pass.entity.id
+                    : pass.entity.teamId ?? 0;
+                const own = pass.entityType === "team"
+                  ? pass.label
+                  : c.game
+                    ? teamName(c.game, passTeamId)
+                    : null;
                 const opp = c.opponent?.displayName || c.opponent?.name || null;
                 const pct = Math.min(100, parseFloat(pass.boostInfo.percentage || "0"));
                 return (
