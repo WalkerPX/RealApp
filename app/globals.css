@@ -311,6 +311,54 @@ button {
   margin-top: auto;
 }
 
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.mini-chip {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.mini-chip.p {
+  color: #7cc4ff;
+  border-color: #7cc4ff55;
+  background: #7cc4ff10;
+}
+
+.mini-chip.score.hot {
+  color: var(--rarity-legendary);
+  border-color: #7856ff77;
+  background: #7856ff12;
+}
+
+.mini-chip.score.warm {
+  color: #d6409f;
+  border-color: #d6409f66;
+  background: #d6409f10;
+}
+
+.mini-chip.tbd {
+  color: #e6b75a;
+  border-color: #e6b75a55;
+  background: #e6b75a0e;
+}
+
+.muted-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .suggestion .s-head {
   font-family: var(--font-mono), monospace;
   font-size: 10.5px;

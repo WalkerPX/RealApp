@@ -5,14 +5,26 @@ import {
   getUserPasses,
   searchUsers,
 } from "@/lib/real-api";
-import { suggestBestBooster } from "@/lib/suggest";
-import { SUPPORTED_SPORTS, type DashboardCard, type Sport } from "@/lib/types";
+import {
+  batterScore,
+  getBoxScore,
+  getRoster,
+  getTodaysMlbGames,
+  pitcherScore,
+  type MlbPlayerStats,
+} from "@/lib/mlb";
+import { planBoosts, type PlayerRole } from "@/lib/boost-plan";
+import {
+  SUPPORTED_SPORTS,
+  type DashboardCard,
+  type Sport,
+  type UserPass,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 const SPORT_IDS = new Set(SUPPORTED_SPORTS.map((s) => s.id));
 
-/** Real days roll at midnight ET — compute "today" there, not UTC. */
 function todayET(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -22,10 +34,55 @@ function todayET(): string {
   }).format(new Date());
 }
 
-/** Team id for a pass: player passes carry entity.teamId, team passes carry
- * the team id in entity.id. */
-function teamIdOf(pass: { entityType: string; entity: { teamId?: number; id: number } }): number {
+function teamIdOf(pass: UserPass): number {
   return pass.entityType === "team" ? pass.entity.id : (pass.entity.teamId ?? 0);
+}
+
+/** Session account id (prefix of real-auth-info) — booster inventory is
+ * scoped to that account, so suggestions only apply when looking up self. */
+function sessionUserId(): string | null {
+  return process.env.REAL_AUTH_INFO?.split("!")[0] ?? null;
+}
+
+/** Match an MLB player for a Real pass (same team pool). Names first —
+ * players change jersey numbers, which silently mis-matches otherwise.
+ * Suffixes (Jr., III) are stripped before comparing. */
+function normName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z ]/g, "")
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findMlbPlayer(
+  players: Map<number, MlbPlayerStats>,
+  pass: UserPass
+): MlbPlayerStats | null {
+  const firstName = normName(pass.entity.firstName ?? "");
+  const lastName = normName(pass.entity.lastName ?? "");
+  const jersey = pass.entity.jersey ? String(pass.entity.jersey) : "";
+
+  let best: MlbPlayerStats | null = null;
+  let bestScore = 0;
+  for (const p of players.values()) {
+    const full = normName(p.name);
+    let score = 0;
+    if (lastName && full === `${firstName} ${lastName}`) score = 4;
+    else if (
+      lastName &&
+      (full === lastName || full.endsWith(` ${lastName}`)) &&
+      (!firstName || full.startsWith(firstName[0]))
+    )
+      score = 3;
+    else if (jersey && p.jersey === jersey) score = 2;
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  return bestScore >= 2 ? best : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -33,21 +90,17 @@ export async function GET(req: NextRequest) {
   const sportRaw = req.nextUrl.searchParams.get("sport") ?? "mlb";
   const sport = sportRaw.toLowerCase() as Sport;
 
-  if (!username) {
-    return NextResponse.json({ error: "Missing username" }, { status: 400 });
-  }
+  if (!username) return NextResponse.json({ error: "Missing username" }, { status: 400 });
   if (!SPORT_IDS.has(sport)) {
-    return NextResponse.json(
-      { error: `Unsupported sport "${sportRaw}"` },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: `Unsupported sport "${sportRaw}"` }, { status: 400 });
+  }
+  if (sport !== "mlb") {
+    return NextResponse.json({ error: "Only MLB is implemented so far" }, { status: 400 });
   }
 
   try {
     const matches = await searchUsers(username);
-    const user = matches.find(
-      (u) => u.userName.toLowerCase() === username.toLowerCase()
-    );
+    const user = matches.find((u) => u.userName.toLowerCase() === username.toLowerCase());
     if (!user) {
       return NextResponse.json(
         { error: `No exact match for "${username}"`, suggestions: matches },
@@ -57,54 +110,139 @@ export async function GET(req: NextRequest) {
 
     const day = todayET();
     const season = new Date().getFullYear();
+    const isSelf = sessionUserId() !== null && sessionUserId() === user.id;
 
-    const [allPasses, schedule] = await Promise.all([
+    const [allPasses, realGames] = await Promise.all([
       getUserPasses(user.id, sport, season),
       getTodaysSchedule(sport),
     ]);
 
-    // "Playing today" = owned cards whose team has a game today. The
-    // collection endpoint carries full per-card boost state, so this is a
-    // complete view (boostcontrol's own "today" list is a fixed top-5 that
-    // ignores day/paging params — not usable as the source of truth).
-    const teamsById = new Map<number, (typeof schedule)[number]>();
-    for (const game of schedule) {
-      teamsById.set(game.homeTeamId, game);
-      teamsById.set(game.awayTeamId, game);
+    // Team ids that play today (Real + MLB share team id space)
+    const teamsById = new Map<number, (typeof realGames)[number]>();
+    for (const g of realGames) {
+      teamsById.set(g.homeTeamId, g);
+      teamsById.set(g.awayTeamId, g);
     }
-    const playingToday = allPasses.filter((p) => teamsById.has(teamIdOf(p)));
+    const playingTeamPasses = allPasses.filter((p) => teamsById.has(teamIdOf(p)));
 
-    let suggestion = null;
-    if (playingToday.length > 0) {
-      const inventory = await getBoosterInventory(playingToday[0].id, sport);
-      suggestion = suggestBestBooster(inventory);
+    // ── MLB reality / projection layer ──────────────────────────
+    const mlbGames = await getTodaysMlbGames(day);
+    const mlbByTeam = new Map<number, (typeof mlbGames)[number]>();
+    for (const g of mlbGames) {
+      mlbByTeam.set(g.homeTeamId, g);
+      mlbByTeam.set(g.awayTeamId, g);
+    }
+    const probableByTeam = new Map<number, number>();
+    for (const g of mlbGames) {
+      if (g.homeProbable) probableByTeam.set(g.homeTeamId, g.homeProbable);
+      if (g.awayProbable) probableByTeam.set(g.awayTeamId, g.awayProbable);
     }
 
-    const cards: DashboardCard[] = playingToday
-      .map((pass) => {
-        const game = teamsById.get(teamIdOf(pass)) ?? null;
-        const opponent = game
-          ? game.homeTeamId === teamIdOf(pass)
-            ? game.awayTeam
-            : game.homeTeam
-          : null;
-        return {
-          pass,
-          game,
-          opponent,
-          suggestedBooster: pass.boostInfo.isCardBoosted ? null : suggestion,
-        };
-      })
-      // Unboosted cards first (actionable), then biggest earners first.
-      .sort((a, b) => {
-        if (a.pass.boostInfo.isCardBoosted !== b.pass.boostInfo.isCardBoosted) {
-          return a.pass.boostInfo.isCardBoosted ? 1 : -1;
+    // Per-team MLB player pool: boxscore when started, roster when scheduled.
+    const playerPool = new Map<number, { players: Map<number, MlbPlayerStats>; played: Set<number>; status: string; lineupTbd: boolean }>();
+    const wantedTeams = new Set(playingTeamPasses.map(teamIdOf).filter((t) => mlbByTeam.has(t)));
+    const teamsByStatus = new Map<number, string>();
+    for (const teamId of wantedTeams) teamsByStatus.set(teamId, mlbByTeam.get(teamId)!.status);
+
+    const finalOrLive = [...teamsByStatus.entries()].filter(([, s]) => s !== "Scheduled");
+    await Promise.all(
+      finalOrLive.map(async ([teamId, status]) => {
+        const game = mlbByTeam.get(teamId)!;
+        const box = await getBoxScore(game.gamePk, status);
+        if (box && box.players.size > 0) {
+          playerPool.set(teamId, { players: box.players, played: box.playedIds, status, lineupTbd: false });
+        } else {
+          playerPool.set(teamId, { players: new Map(), played: new Set(), status, lineupTbd: true });
         }
-        return (
-          parseFloat(b.pass.boostValue ?? "0") -
-          parseFloat(a.pass.boostValue ?? "0")
-        );
-      });
+      })
+    );
+    const scheduledTeams = [...teamsByStatus.entries()].filter(([, s]) => s === "Scheduled");
+    await Promise.all(
+      scheduledTeams.map(async ([teamId, status]) => {
+        const roster = await getRoster(teamId);
+        playerPool.set(teamId, { players: roster, played: new Set(), status, lineupTbd: true });
+      })
+    );
+
+    const cards: DashboardCard[] = [];
+    const candidates: { passId: number; role: PlayerRole; score: number }[] = [];
+
+    for (const pass of playingTeamPasses) {
+      const teamId = teamIdOf(pass);
+      const realGame = teamsById.get(teamId) ?? null;
+      const opponent = realGame
+        ? realGame.homeTeamId === teamId
+          ? realGame.awayTeam
+          : realGame.homeTeam
+        : null;
+      const pool = playerPool.get(teamId);
+
+      // Team passes: show whenever their team plays; no lineup concept.
+      if (pass.entityType === "team") {
+        if (pool) {
+          cards.push({ pass, game: realGame, opponent, role: "team", score: null, lineupTbd: false, suggestedBooster: null });
+        }
+        continue;
+      }
+
+      // Players: hurt? → skip. Not on a real MLB team today? → skip.
+      if (!pool || !mlbByTeam.has(teamId)) continue;
+      const injury = pass.entity.injuryStatus?.toLowerCase();
+      if (injury && injury !== "active" && injury !== "available") continue;
+
+      const isTwoWay = (pass.infoDetail ?? "").toUpperCase() === "TWP";
+      const mlbPlayer = findMlbPlayer(pool.players, pass);
+      if (!mlbPlayer) continue; // not on active roster / no MLB data
+
+      const realPosPitcher = (pass.infoDetail ?? "").toUpperCase() === "P";
+      const posPitcher = !isTwoWay && (realPosPitcher || mlbPlayer.posAbbr === "P");
+      const finalRole: PlayerRole = posPitcher ? "pitcher" : "hitter";
+      let projected = false;
+      let lineupTbd = false;
+      let score = 0;
+
+      if (pool.status !== "Scheduled") {
+        projected = pool.played.has(mlbPlayer.id);
+        lineupTbd = pool.played.size === 0; // game not started yet
+        if (projected) score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
+        if (!projected && pool.played.size === 0) {
+          // Game live/final but nobody listed yet (weather etc.) — keep roster fallback
+          projected = mlbPlayer.statusCode === "A";
+          lineupTbd = true;
+          score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
+        }
+      } else {
+        if (mlbPlayer.statusCode !== "A") continue; // IL/minors
+        if (finalRole === "pitcher") {
+          projected = probableByTeam.get(teamId) === mlbPlayer.id; // only the starter
+        } else {
+          projected = true; // lineup not posted yet
+          lineupTbd = true;
+        }
+        score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
+      }
+
+      if (!projected) continue;
+      cards.push({ pass, game: realGame, opponent, role: finalRole, score, lineupTbd, suggestedBooster: null });
+      if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score });
+    }
+
+    // ── Booster plan (own account only: inventory is session-scoped) ──
+    if (isSelf && candidates.length > 0) {
+      const anchorPass = playingTeamPasses.find((p) => p.entityType === "player") ?? playingTeamPasses[0];
+      const inventory = await getBoosterInventory(anchorPass.id, sport);
+      const plan = planBoosts(candidates, inventory);
+      for (const c of cards) {
+        c.suggestedBooster = c.pass.boostInfo.isCardBoosted ? null : (plan.get(c.pass.id) ?? null);
+      }
+    }
+
+    cards.sort((a, b) => {
+      if (a.pass.boostInfo.isCardBoosted !== b.pass.boostInfo.isCardBoosted) {
+        return a.pass.boostInfo.isCardBoosted ? 1 : -1;
+      }
+      return (b.score ?? -1) - (a.score ?? -1);
+    });
 
     return NextResponse.json({
       user,
@@ -112,6 +250,8 @@ export async function GET(req: NextRequest) {
       day,
       cards,
       totalOwned: allPasses.length,
+      projectedCount: cards.filter((c) => c.role !== "team").length,
+      suggestionsForSelf: isSelf,
     });
   } catch (err) {
     console.error(err);

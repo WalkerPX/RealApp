@@ -4,8 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { realBoostUrl } from "@/lib/real-api";
 import { SUPPORTED_SPORTS, type DashboardResponse, type Sport } from "@/lib/types";
 
-const EMPTY: DashboardResponse = { user: null as never, sport: "mlb", day: "", cards: [], totalOwned: 0 };
-
 function teamName(game: NonNullable<DashboardResponse["cards"][number]["game"]>, teamId: number) {
   const t = game.homeTeamId === teamId ? game.homeTeam : game.awayTeam;
   return t?.displayName || t?.name || null;
@@ -101,8 +99,15 @@ export default function Page() {
         <>
           <p className="summary">
             <strong>{data.user.userName}</strong> owns <strong>{data.totalOwned}</strong>{" "}
-            {data.sport.toUpperCase()} cards · <strong>{data.cards.length}</strong> playing today
-            ({data.day})
+            {data.sport.toUpperCase()} cards · <strong>{data.projectedCount}</strong> projected to
+            play today ({data.day})
+            {data.suggestionsForSelf === false && (
+              <span className="muted-note">
+                {" "}
+                — booster suggestions only apply when looking up the configured account&apos;s own
+                username
+              </span>
+            )}
           </p>
 
           {data.cards.length === 0 ? (
@@ -132,6 +137,23 @@ export default function Page() {
                         <h3 className="player-name">{pass.label}</h3>
                         <div className="player-meta">
                           {[own, pass.infoDetail].filter(Boolean).join(" · ")}
+                        </div>
+                        <div className="chips">
+                          {c.role === "pitcher" && <span className="mini-chip p">P</span>}
+                          {c.role === "team" && <span className="mini-chip">TEAM</span>}
+                          {c.score !== null && c.score > 0 && (
+                            <span
+                              className={`mini-chip score ${c.score >= 80 ? "hot" : c.score >= 58 ? "warm" : ""}`}
+                              title="Projected game quality (season form vs 0-100)"
+                            >
+                              proj {c.score}
+                            </span>
+                          )}
+                          {c.lineupTbd && (
+                            <span className="mini-chip tbd" title="Lineups aren't posted yet">
+                              lineup TBD
+                            </span>
+                          )}
                         </div>
                       </div>
                       <span

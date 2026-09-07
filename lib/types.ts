@@ -143,10 +143,17 @@ export interface SuggestedBooster {
   remainingCount: number;
 }
 
+export type PlayerRole = "pitcher" | "hitter" | "team";
+
 export interface DashboardCard {
   pass: UserPass;
   game: Game | null;
   opponent: Team | null;
+  role: PlayerRole;
+  /** 0-100 projection of today's game quality (null for team passes). */
+  score: number | null;
+  /** True when roster-based (lineup not posted yet) rather than boxscore. */
+  lineupTbd: boolean;
   suggestedBooster: SuggestedBooster | null;
 }
 
@@ -156,4 +163,6 @@ export interface DashboardResponse {
   day: string;
   cards: DashboardCard[];
   totalOwned: number;
+  projectedCount: number;
+  suggestionsForSelf: boolean;
 }
