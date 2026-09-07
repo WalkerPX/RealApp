@@ -25,6 +25,11 @@ export const dynamic = "force-dynamic";
 
 const SPORT_IDS = new Set(SUPPORTED_SPORTS.map((s) => s.id));
 
+// Game hasn't started: use active-roster projection, not a (404) boxscore.
+// MLB reports these as "Scheduled" early, then "Pre-Game"/"Warmup" close to
+// first pitch — all three must take the roster path or starters vanish.
+const UPCOMING = new Set(["Scheduled", "Pre-Game", "Warmup"]);
+
 function todayET(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -144,7 +149,7 @@ export async function GET(req: NextRequest) {
     const teamsByStatus = new Map<number, string>();
     for (const teamId of wantedTeams) teamsByStatus.set(teamId, mlbByTeam.get(teamId)!.status);
 
-    const finalOrLive = [...teamsByStatus.entries()].filter(([, s]) => s !== "Scheduled");
+    const finalOrLive = [...teamsByStatus.entries()].filter(([, s]) => !UPCOMING.has(s));
     await Promise.all(
       finalOrLive.map(async ([teamId, status]) => {
         const game = mlbByTeam.get(teamId)!;
@@ -156,7 +161,7 @@ export async function GET(req: NextRequest) {
         }
       })
     );
-    const scheduledTeams = [...teamsByStatus.entries()].filter(([, s]) => s === "Scheduled");
+    const scheduledTeams = [...teamsByStatus.entries()].filter(([, s]) => UPCOMING.has(s));
     await Promise.all(
       scheduledTeams.map(async ([teamId, status]) => {
         const roster = await getRoster(teamId);
@@ -165,7 +170,7 @@ export async function GET(req: NextRequest) {
     );
 
     const cards: DashboardCard[] = [];
-    const candidates: { passId: number; role: PlayerRole; score: number }[] = [];
+    const candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean }[] = [];
 
     for (const pass of playingTeamPasses) {
       const teamId = teamIdOf(pass);
@@ -201,7 +206,7 @@ export async function GET(req: NextRequest) {
       let lineupTbd = false;
       let score = 0;
 
-      if (pool.status !== "Scheduled") {
+      if (!UPCOMING.has(pool.status)) {
         projected = pool.played.has(mlbPlayer.id);
         lineupTbd = pool.played.size === 0; // game not started yet
         if (projected) score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
@@ -224,7 +229,7 @@ export async function GET(req: NextRequest) {
 
       if (!projected) continue;
       cards.push({ pass, game: realGame, opponent, role: finalRole, score, lineupTbd, suggestedBooster: null });
-      if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score });
+      if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score, boosted: pass.boostInfo.isCardBoosted === true });
     }
 
     // ── Booster plan (own account only: inventory is session-scoped) ──
@@ -233,7 +238,9 @@ export async function GET(req: NextRequest) {
       const inventory = await getBoosterInventory(anchorPass.id, sport);
       const plan = planBoosts(candidates, inventory);
       for (const c of cards) {
-        c.suggestedBooster = c.pass.boostInfo.isCardBoosted ? null : (plan.get(c.pass.id) ?? null);
+        // Keep the suggestion even when already boosted — it still shows what
+        // to play next; the UI marks boosted cards with a BOOSTED tag.
+        c.suggestedBooster = plan.get(c.pass.id) ?? null;
       }
     }
 

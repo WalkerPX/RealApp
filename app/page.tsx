@@ -26,15 +26,19 @@ const RARITY_COLORS: Record<string, string> = {
 };
 
 function rarityColor(label?: string | null): string {
-  if (!label) return RARITY_COLORS.legendary;
+  if (!label) return ICY_BLUE;
   const k = label.toLowerCase();
   for (const key of ["legendary", "epic", "rare", "uncommon", "common"]) {
     if (k.includes(key)) return RARITY_COLORS[key];
   }
-  return RARITY_COLORS.legendary;
+  return ICY_BLUE;
 }
 
-function CardView({ c, sport }: { c: DashboardCard; sport: Sport }) {
+// Fallback for non-rarity labels ("General", lineup TBD, etc.) — matches the
+// icy theme accent rather than implying a rarity.
+const ICY_BLUE = "#38bdf8";
+
+function CardView({ c }: { c: DashboardCard }) {
   const { pass } = c;
   const passTeamId =
     pass.entityType === "team"
@@ -50,6 +54,7 @@ function CardView({ c, sport }: { c: DashboardCard; sport: Sport }) {
   const pct = Math.min(100, parseFloat(pass.boostInfo.percentage || "0"));
   const cardColor = rarityColor(pass.boostInfo.rarityLabel);
   const suggColor = c.suggestedBooster ? rarityColor(c.suggestedBooster.rarityLabel) : null;
+  const boosted = pass.boostInfo.isCardBoosted === true;
 
   return (
     <article className="card">
@@ -94,9 +99,7 @@ function CardView({ c, sport }: { c: DashboardCard; sport: Sport }) {
         </div>
       </div>
 
-      {pass.boostInfo.isCardBoosted && <span className="boosted-tag">BOOSTED</span>}
-
-      {!pass.boostInfo.isCardBoosted && c.suggestedBooster && suggColor && (
+      {c.suggestedBooster && suggColor && (
         <div
           className="suggestion"
           style={{
@@ -118,13 +121,15 @@ function CardView({ c, sport }: { c: DashboardCard; sport: Sport }) {
             {" · "}
             {c.suggestedBooster.remainingCount} in stock
           </div>
-          <a href={realBoostUrl(pass.id, sport)} target="_blank" rel="noreferrer">
+          <a href={realBoostUrl(pass.entity.id)} target="_blank" rel="noreferrer">
             Boost on Real →
           </a>
         </div>
       )}
 
-      {opp && !pass.boostInfo.isCardBoosted && !c.suggestedBooster && (
+      {boosted && <span className="boosted-tag">BOOSTED</span>}
+
+      {opp && !boosted && !c.suggestedBooster && (
         <div className="matchup">vs <strong>{opp}</strong></div>
       )}
     </article>
@@ -178,12 +183,16 @@ export default function Page() {
 
   return (
     <main className="shell">
-      <h1 className="brand">
-        walkr<span className="dot">.</span>
-      </h1>
-      <p className="tagline">
-        Real Sports boost control — who&apos;s playing today, and what to play on them.
-      </p>
+      <header className="topbar">
+        <a
+          className="toplink"
+          href="https://www.realapp.com/u/walkr"
+          target="_blank"
+          rel="noreferrer"
+        >
+          @walkr on real
+        </a>
+      </header>
 
       <div className="panel">
         <div className="sports" role="tablist" aria-label="Sport">
@@ -256,7 +265,7 @@ export default function Page() {
                     </h2>
                     <div className="grid">
                       {cards.map((c) => (
-                        <CardView key={c.pass.id} c={c} sport={sport} />
+                        <CardView key={c.pass.id} c={c} />
                       ))}
                     </div>
                   </section>

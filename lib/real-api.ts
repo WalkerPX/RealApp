@@ -5,7 +5,7 @@ import type {
   Sport,
   UserPass,
 } from "./types";
-import { requestToken } from "./hashids";
+import { RealHashids, requestToken } from "./hashids";
 
 const BASE = "https://web.realapp.com";
 
@@ -132,7 +132,12 @@ export async function getTodaysSchedule(sport: Sport): Promise<Game[]> {
   return data.latestDayContent?.games ?? [];
 }
 
-/** Opens the card's booster view inside a logged-in web.realapp.com session. */
-export function realBoostUrl(passId: number, sport: Sport): string {
-  return `${BASE}/userpassboostercards/${passId}/entity/player?displayType=userpass&sport=${sport}&version=stat`;
+/** Real's share-link encoder (salt "routing", min length 11). Player booster
+ * page route shape — decode-verified against a real share link (Ohtani →
+ * realapp.com/k3tvTvFwRow): [type=2, sport=4 (MLB), 0, playerEntityId].
+ * Public URL — unlike the web.realapp.com API path, opens without a session. */
+const _ROUTING_HASH = new RealHashids("routing", 11);
+
+export function realBoostUrl(playerEntityId: number): string {
+  return `https://www.realapp.com/${_ROUTING_HASH.encode([2, 4, 0, playerEntityId])}`;
 }

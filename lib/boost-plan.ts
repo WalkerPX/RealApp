@@ -6,6 +6,9 @@ export interface PlanCandidate {
   passId: number;
   role: PlayerRole;
   score: number; // 0-100 projection
+  /** Already has a booster active today — can't boost again, so they rank
+   * below actionable cards and only get stock that's left over. */
+  boosted?: boolean;
 }
 
 interface StatPick {
@@ -95,7 +98,11 @@ export function planBoosts(
   };
 
   const out = new Map<number, SuggestedBooster>();
-  const ranked = [...candidates].sort((a, b) => b.score - a.score);
+  // Actionable (unboosted) cards first by score; boosted cards sink to the
+  // tail and take whatever stock is left.
+  const ranked = [...candidates].sort(
+    (a, b) => (a.boosted ? 1 : 0) - (b.boosted ? 1 : 0) || b.score - a.score
+  );
 
   for (const c of ranked) {
     for (const rarity of tiers(c.role, c.score)) {

@@ -165,8 +165,13 @@ export async function getRoster(teamId: number): Promise<Map<number, MlbPlayerSt
   );
   const out = new Map<number, MlbPlayerStats>();
   for (const r of d.roster ?? []) {
-    const statOf = (grp: string) => {
-      const g = (r.person.stats ?? []).find((s) => s.group.displayName === grp);
+    const statOf = (kind: "batting" | "pitching") => {
+      // MLB hydrate names the group "hitting", season-stats calls it
+      // "batting" — accept either.
+      const g = (r.person.stats ?? []).find((s) => {
+        const dn = s.group.displayName.toLowerCase();
+        return kind === "pitching" ? dn.startsWith("pitch") : dn.startsWith("hitt") || dn.startsWith("batt");
+      });
       const st = g?.splits?.[0]?.stat ?? {};
       return st;
     };

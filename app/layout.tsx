@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { Manrope, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Space_Grotesk({
+const display = Manrope({
   subsets: ["latin"],
-  weight: ["500", "700"],
+  weight: ["400", "500", "600", "700", "800"],
   variable: "--font-display",
 });
 
@@ -15,7 +15,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "walkr — Real Sports boost control",
+  title: "@walkr on real — Real Sports boost control",
   description:
     "Look up a Real Sports App username, see who's playing today, and find the best booster to apply.",
 };
