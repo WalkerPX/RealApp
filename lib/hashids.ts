@@ -75,6 +75,10 @@ export class RealHashids {
       }
     }
     this.alphabet = shuffleArr(alphabet, this.salt);
+    // Full shuffled separator set survives into the large-alphabet branch —
+    // only the tiny-alphabet branch trims it below. (Latent bug: without
+    // this, multi-number encode() crashed on this.seps being undefined.)
+    this.seps = seps.slice();
     const s = Math.floor(this.alphabet.length / 12);
     if (this.alphabet.length < 3) {
       this.guards = seps.slice(0, s);
