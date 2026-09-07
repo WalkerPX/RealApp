@@ -277,7 +277,7 @@ export default function Page() {
       )}
 
       <p className="foot">
-        Unofficial tool. Data from the Real Sports App web API — <code>MLB only for now</code>.
+        Made by <a href="https://www.realapp.com/u/walkr" target="_blank" rel="noreferrer">@walkr</a> on real
       </p>
     </main>
   );

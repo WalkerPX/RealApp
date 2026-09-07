@@ -194,6 +194,26 @@ export async function getRoster(teamId: number): Promise<Map<number, MlbPlayerSt
   return out;
 }
 
+type LeadersResp = {
+  stats: { splits: { player: { id: number }; stat: Record<string, unknown> }[] }[];
+};
+
+/** Top-25 qualified pitchers by K/9 this season (sorted desc; min 50 IP skips
+ * openers/position players). K booster suggestions are reserved for these. */
+export async function getTopK9Ids(season: number): Promise<Set<number>> {
+  const d = await mlbFetch<LeadersResp>(
+    `/stats?stats=season&group=pitching&gameType=R&sportIds=1&season=${season}&sortStat=strikeOutsPer9Inn&limit=60`,
+    TTL_SCHED
+  );
+  const ranked: number[] = [];
+  for (const s of d.stats?.[0]?.splits ?? []) {
+    const ip = Number(s.stat.inningsPitched ?? 0);
+    if (ip >= 50) ranked.push(s.player.id);
+    if (ranked.length >= 25) break;
+  }
+  return new Set(ranked);
+}
+
 // ── projection scores (season form → 0-100) ──────────────────
 
 /** Batters: OPS-based. ~.620 → 0, ~1.040 → 100. */

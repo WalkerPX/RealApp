@@ -78,39 +78,20 @@ button {
 .topbar {
   display: flex;
   justify-content: center;
-  margin: 6px 0 22px;
+  margin: 12px 0 26px;
 }
 
 .toplink {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
+  font-size: 26px;
   font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--accent-soft);
+  letter-spacing: -0.02em;
+  color: var(--text);
   text-decoration: none;
-  padding: 7px 18px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
-  box-shadow: 0 0 0 1px transparent, 0 2px 18px var(--accent-glow);
-  transition: border-color 0.15s, box-shadow 0.15s, color 0.15s;
+  transition: color 0.15s;
 }
 
 .toplink:hover {
-  color: #fff;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-glow), 0 2px 26px var(--accent-glow);
-}
-
-.toplink::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4ade80;
-  box-shadow: 0 0 8px rgba(74, 222, 128, 0.8);
+  color: var(--accent-soft);
 }
 
 .panel {
@@ -499,4 +480,14 @@ button {
 .foot code {
   font-family: var(--font-mono), monospace;
   font-size: 11px;
+}
+
+.foot a {
+  color: var(--accent-soft);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.foot a:hover {
+  text-decoration: underline;
 }

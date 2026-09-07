@@ -10,6 +10,7 @@ import {
   getBoxScore,
   getRoster,
   getTodaysMlbGames,
+  getTopK9Ids,
   pitcherScore,
   type MlbPlayerStats,
 } from "@/lib/mlb";
@@ -170,7 +171,10 @@ export async function GET(req: NextRequest) {
     );
 
     const cards: DashboardCard[] = [];
-    const candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean }[] = [];
+    const candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean; kTop25?: boolean }[] = [];
+
+    // Elite strikeout arms — only they may get K booster suggestions.
+    const topK9 = isSelf ? await getTopK9Ids(season) : new Set<number>();
 
     for (const pass of playingTeamPasses) {
       const teamId = teamIdOf(pass);
@@ -229,7 +233,7 @@ export async function GET(req: NextRequest) {
 
       if (!projected) continue;
       cards.push({ pass, game: realGame, opponent, role: finalRole, score, lineupTbd, suggestedBooster: null });
-      if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score, boosted: pass.boostInfo.isCardBoosted === true });
+      if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score, boosted: pass.boostInfo.isCardBoosted === true, kTop25: finalRole === "pitcher" && topK9.has(mlbPlayer.id) });
     }
 
     // ── Booster plan (own account only: inventory is session-scoped) ──

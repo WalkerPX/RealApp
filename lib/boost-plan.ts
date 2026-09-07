@@ -9,6 +9,8 @@ export interface PlanCandidate {
   /** Already has a booster active today — can't boost again, so they rank
    * below actionable cards and only get stock that's left over. */
   boosted?: boolean;
+  /** Pitcher ranked top-25 in K/9 — only they get strikeout (K) boosters. */
+  kTop25?: boolean;
 }
 
 interface StatPick {
@@ -21,7 +23,8 @@ interface StatPick {
 /** In-place budget: picks a stat within a rarity group, consuming one unit. */
 function takeStat(
   group: BoosterRarityGroup,
-  preferredKeys: string[]
+  preferredKeys: string[],
+  bannedKey?: string
 ): StatPick | null {
   for (const key of preferredKeys) {
     const entry = group.statBoostKeyInfo.find(
@@ -37,8 +40,10 @@ function takeStat(
       };
     }
   }
-  // Any in-stock stat as last resort
-  const any = group.statBoostKeyInfo.find((s) => s.count > 0);
+  // Any in-stock stat as last resort (never the banned one)
+  const any = group.statBoostKeyInfo.find(
+    (s) => s.count > 0 && s.statBoostKey !== bannedKey
+  );
   if (any) {
     any.count -= 1;
     return {
@@ -54,15 +59,23 @@ function takeStat(
 function takeFromRarity(
   groups: BoosterRarityGroup[],
   rarity: number,
-  role: PlayerRole
+  role: PlayerRole,
+  kTop25: boolean
 ): { pick: StatPick; group: BoosterRarityGroup } | null {
   const group = groups.find((g) => g.rarity === rarity && g.count > 0);
   if (!group) return null;
-  // Pitchers boost on strikeouts (stat key "70"). Hitters prefer power
+  // Pitchers strike out — but only elite K/9 arms get the strikeout stat
+  // ("70"). Everyone else boosts their own card's best non-K stats, and the
+  // K stat is banned even as a last resort for them. Hitters prefer power
   // (HR/3B) then 2B, RBI, R — whatever the card's own stats are worth most.
+  const kAllowed = role !== "pitcher" || kTop25;
   const preferred =
-    role === "pitcher" ? ["70", "3", "5"] : ["2_11", "10", "3", "5", "70"];
-  const pick = takeStat(group, preferred);
+    role === "pitcher"
+      ? kAllowed
+        ? ["70", "3", "5"]
+        : ["3", "5"]
+      : ["2_11", "10", "3", "5", "70"];
+  const pick = takeStat(group, preferred, kAllowed ? undefined : "70");
   if (!pick) return null;
   group.count -= 1;
   return { pick, group };
@@ -106,7 +119,7 @@ export function planBoosts(
 
   for (const c of ranked) {
     for (const rarity of tiers(c.role, c.score)) {
-      const taken = takeFromRarity(groups, rarity, c.role);
+      const taken = takeFromRarity(groups, rarity, c.role, c.kTop25 === true);
       if (!taken) continue;
       const { pick, group } = taken;
       out.set(c.passId, {
