@@ -6,6 +6,13 @@ import type {
   UserPass,
 } from "./types";
 import { RealHashids, requestToken } from "./hashids";
+import {
+  listingPlayerLabel,
+  listingPrice,
+  parseFmvMedian,
+  splitEarnings,
+  type RawListing,
+} from "./deals";
 
 const BASE = "https://web.realapp.com";
 
@@ -140,4 +147,93 @@ const _ROUTING_HASH = new RealHashids("routing", 11);
 
 export function realBoostUrl(playerEntityId: number): string {
   return `https://www.realapp.com/${_ROUTING_HASH.encode([2, 4, 0, playerEntityId])}`;
+}
+
+/** Marketplace listing share link (type=30 route, decode-verified). */
+export function realListingUrl(listingId: number): string {
+  return `https://www.realapp.com/${_ROUTING_HASH.encode([30, 0, 0, listingId])}`;
+}
+
+// ── marketplace (deals) ──────────────────────────────────────
+// Deals scans fan out over many listings; a tiny per-instance TTL cache keeps
+// repeat FMV/earnings lookups within a scan (and across scans) cheap.
+const mktCache = new Map<string, { t: number; v: unknown }>();
+const MKT_TTL = 6 * 60 * 60 * 1000;
+
+async function mktFetch<T>(path: string): Promise<T> {
+  const hit = mktCache.get(path);
+  if (hit && hit.t > Date.now()) return hit.v as T;
+  const res = await fetch(`${BASE}${path}`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Real API auth rejected (401)");
+    throw new Error(`Real API ${path.split("?")[0]} -> ${res.status}`);
+  }
+  const data = (await res.json()) as T;
+  mktCache.set(path, { t: Date.now() + MKT_TTL, v: data });
+  if (mktCache.size > 400) {
+    const now = Date.now();
+    for (const [k, e] of mktCache) if (e.t < now) mktCache.delete(k);
+  }
+  return data;
+}
+
+export async function fetchMarketplaceListings(params: {
+  sport: string;
+  season: number;
+  rarity: number;
+  listingType: string;
+  beforeEndsAt?: string;
+}): Promise<RawListing[]> {
+  const q = new URLSearchParams({
+    sport: params.sport,
+    season: String(params.season),
+    rarity: String(params.rarity),
+    offset: "0",
+    listingType: params.listingType,
+  });
+  if (params.beforeEndsAt) q.set("beforeEndsAt", params.beforeEndsAt);
+  const d = await mktFetch<{ listings?: RawListing[] }>(
+    `/cardmarketplacelistings?${q}`
+  );
+  return d.listings ?? [];
+}
+
+export async function fetchFmvMedian(
+  cardId: number,
+  listingType: string
+): Promise<number | null> {
+  const d = await mktFetch<{ summaryInfo?: { header?: string; value?: unknown }[] }>(
+    `/marketplace/fmv/${cardId}?listingType=${encodeURIComponent(listingType)}`
+  );
+  return parseFmvMedian(d);
+}
+
+/** Earnings calendar for a player pass at its boost level. */
+export async function fetchPlayerEarnings(
+  sport: string,
+  season: number,
+  playerId: number,
+  level?: number | null
+): Promise<{ total: number; remaining: number } | null> {
+  const q = new URLSearchParams();
+  if (level) q.set("level", String(level));
+  const path = `/userpassearnings/${sport}/season/${season}/entity/player/${playerId}${q.size ? `?${q}` : ""}`;
+  try {
+    const d = await mktFetch<{ earnings?: unknown[] }>(path);
+    const earnings = (d.earnings ?? []) as {
+      day?: string;
+      atRarityEarnings?: unknown;
+      earnings?: unknown;
+    }[];
+    if (!earnings.length) return null;
+    const et = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "America/New_York" })
+    );
+    return splitEarnings(earnings, et);
+  } catch {
+    return null; // no calendar / lookup failure — fall back to FMV-only
+  }
 }

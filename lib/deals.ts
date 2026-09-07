@@ -1,0 +1,201 @@
+/**
+ * Real marketplace deal engine (web-friendly port of real-deal-tracker's
+ * real_deals.py). Pure GETs against the Real web API — no LLM anywhere.
+ *
+ * The cron tracker scans everything market-wide with disk caches + a long
+ * budget; a Vercel function can't. So this engine takes an explicit filter
+ * (sport + season + card types + rarities + optional player names) and scans
+ * only that slice, time-boxed (~20s) with in-memory FMV caching.
+ */
+
+export type DealSport = "nfl" | "ncaaf" | "mlb" | "wnba" | "soccer";
+export type DealListingType = "userpassfull" | "card";
+
+export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
+  { id: "mlb", label: "MLB" },
+  { id: "wnba", label: "WNBA" },
+  { id: "ncaaf", label: "CFB" },
+  { id: "nfl", label: "NFL" },
+  { id: "soccer", label: "FC" },
+];
+
+/** Season per sport (API stores every season as its starting year). */
+export const DEAL_SEASONS: Record<DealSport, number[]> = {
+  mlb: [2026, 2025, 2024],
+  wnba: [2026, 2025, 2024],
+  ncaaf: [2025, 2024, 2023],
+  nfl: [2025, 2024],
+  soccer: [2025],
+};
+
+/** Seasons still in progress — cards have no future OTD claim dates yet, so
+ * the "pays for itself" (ROI) check only applies to past seasons. */
+export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
+  mlb: 2026,
+  wnba: 2026,
+};
+
+export const RARITY_LABELS: Record<number, string> = {
+  3: "Rare",
+  4: "Epic",
+  5: "Legendary",
+  6: "Mystic",
+  7: "Iconic",
+};
+
+export function seasonLabel(sport: DealSport, season: number): string {
+  if (sport === "mlb" || sport === "wnba") return String(season);
+  return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
+}
+
+export const LISTING_TYPE_META: Record<
+  DealListingType,
+  { label: string; short: string }
+> = {
+  userpassfull: { label: "Bulk rating cards", short: "BULK" },
+  card: { label: "Play cards", short: "PLAY" },
+};
+
+export interface DealFilters {
+  sport: DealSport;
+  season: number;
+  listingTypes: DealListingType[];
+  rarities: number[];
+  /** Plain player names (norm-matched against the listing player). */
+  players?: string[];
+  minDiscountPct: number;
+  auctionOnly: boolean;
+  maxPages: number;
+}
+
+export interface Deal {
+  listingId: number;
+  type: DealListingType;
+  rarity: number;
+  rarityLabel: string;
+  boost: string; // e.g. "Legendary 2" (bulk) or "" (play)
+  player: string;
+  price: number;
+  median: number | null;
+  discountPct: number | null;
+  /** Rax still collectable from today onward (past seasons only). */
+  remaining: number | null;
+  endsAt: string | null;
+  canBid: boolean;
+  url: string;
+  isDiscountDeal: boolean;
+  isRoiDeal: boolean;
+  upside: number;
+}
+
+export interface DealsResult {
+  deals: Deal[];
+  scanned: number;
+  lookedUp: number;
+  timedOut: boolean;
+  elapsedMs: number;
+}
+
+/** Lowercase alphanumerics only — "A'ja Wilson" == "Aja Wilson". */
+export function normName(s: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function playerMatches(label: string, queries: string[]): boolean {
+  if (!queries.length) return true;
+  const nl = normName(label);
+  const tokens = label.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return queries.some((q) => {
+    const nq = normName(q);
+    if (!nq) return false;
+    if (nl === nq) return true; // full name match ("Ezequiel Tovar")
+    // play-card names come abbreviated ("E. Tovar") — last-name match
+    return tokens.some((t) => t === nq && nq.length >= 3);
+  });
+}
+
+export { playerMatches };
+
+export function fmtRax(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("en-US");
+}
+
+export interface RawListing {
+  id: number;
+  cardId: number;
+  playerId?: number | null;
+  entityType?: string;
+  rarity: number;
+  endsAt?: string | null;
+  canBid?: boolean;
+  buyNowPrice?: number | null;
+  currentBidAmount?: number | null;
+  minBidPrice?: number | null;
+  card?: {
+    label?: string | null;
+    entityLabel?: string | null;
+    primaryPlayer?: { displayName?: string | null } | null;
+    boostInfo?: { rarityLabel?: string | null; level?: number | null } | null;
+  } | null;
+}
+
+/** Best human player label for a listing. */
+export function listingPlayerLabel(l: RawListing): string {
+  const c = l.card ?? {};
+  if (c.label) return c.label;
+  if (c.primaryPlayer?.displayName) return c.primaryPlayer.displayName;
+  if (c.entityLabel) return c.entityLabel;
+  return `card ${l.cardId}`;
+}
+
+export function listingPrice(l: RawListing): number | null {
+  if (l.buyNowPrice != null) return Number(l.buyNowPrice);
+  if (l.currentBidAmount != null) return Number(l.currentBidAmount);
+  if (l.minBidPrice != null) return Number(l.minBidPrice);
+  return null;
+}
+
+export function boostLabel(l: RawListing): string {
+  return l.card?.boostInfo?.rarityLabel ?? "";
+}
+
+/** Median FMV from /marketplace/fmv summaryInfo. */
+export function parseFmvMedian(data: {
+  summaryInfo?: { header?: string; value?: unknown }[];
+}): number | null {
+  for (const si of data.summaryInfo ?? []) {
+    if (si.header === "Median" && si.value != null) {
+      const v = Number(String(si.value).replace(/,/g, ""));
+      if (!Number.isNaN(v)) return v;
+    }
+  }
+  return null;
+}
+
+/** Sum earnings at the card's level; remaining = dates still ahead (US/Eastern). */
+export function splitEarnings(
+  earnings: { day?: string; atRarityEarnings?: unknown; earnings?: unknown }[],
+  nowEt: Date
+): { total: number; remaining: number } {
+  let total = 0;
+  let remaining = 0;
+  const todayMd = (nowEt.getMonth() + 1) * 100 + nowEt.getDate();
+  for (const e of earnings ?? []) {
+    const raw = e.atRarityEarnings ?? e.earnings;
+    if (raw == null) continue;
+    const v = Number(raw);
+    if (Number.isNaN(v)) continue;
+    total += v;
+    if (e.day) {
+      const d = new Date(e.day + "T00:00:00Z");
+      if (!Number.isNaN(d.getTime())) {
+        const md = (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+        if (md >= todayMd) remaining += v;
+      }
+    } else {
+      remaining += v;
+    }
+  }
+  return { total, remaining };
+}

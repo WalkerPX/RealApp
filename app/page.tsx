@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { realBoostUrl } from "@/lib/real-api";
+import ShopPanel from "@/components/shop-panel";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -143,6 +144,7 @@ const GROUP_TITLES: Record<PlayerRole, string> = {
 };
 
 export default function Page() {
+  const [view, setView] = useState<"boost" | "shop">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
@@ -203,34 +205,52 @@ export default function Page() {
               aria-selected={s.id === sport}
               className={`sport-pill ${s.id === sport ? "active" : ""}`}
               disabled={!s.implemented}
-              onClick={() => setSport(s.id)}
+              onClick={() => {
+                setView("boost");
+                setSport(s.id);
+              }}
             >
               {s.label}
             </button>
           ))}
+          <button
+            key="shop"
+            role="tab"
+            aria-selected={view === "shop"}
+            className={`sport-pill shop ${view === "shop" ? "active" : ""}`}
+            onClick={() => setView("shop")}
+          >
+            Shop
+          </button>
         </div>
 
-        <form
-          className="search-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run();
-          }}
-        >
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Real username (e.g. walkr)"
-            autoFocus
-            spellCheck={false}
-          />
-          <button className="btn" type="submit" disabled={loading || !username.trim()}>
-            {loading ? "loading…" : "Look up"}
-          </button>
-        </form>
+        {view === "boost" && (
+          <form
+            className="search-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run();
+            }}
+          >
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Real username (e.g. walkr)"
+              autoFocus
+              spellCheck={false}
+            />
+            <button className="btn" type="submit" disabled={loading || !username.trim()}>
+              {loading ? "loading…" : "Look up"}
+            </button>
+          </form>
+        )}
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {view === "shop" ? (
+        <ShopPanel />
+      ) : (
+        <>
+          {error && <div className="error-banner">{error}</div>}
 
       {data && (
         <>
@@ -274,6 +294,8 @@ export default function Page() {
             </div>
           )}
         </>
+      )}
+      </>
       )}
 
       <p className="foot">
