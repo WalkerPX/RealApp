@@ -21,6 +21,17 @@ const BASE = "https://web.realapp.com";
 //  B) cookie fallback: REAL_AUTH_COOKIE = full Cookie header from a logged-in
 //     web.realapp.com session.
 // ─────────────────────────────────────────────────────────────
+// Device headers the Real API requires (verified working set from
+// real-deal-tracker config). Real rejects requests without them, so these
+// ship as defaults — env vars still override when they need to rotate.
+const DEVICE_DEFAULTS = {
+  type: "desktop_web",
+  name:
+    "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  uuid: "265341f5-e06c-422c-b476-c3bd4507f1a6",
+  version: "35",
+};
+
 function authHeaders(): HeadersInit {
   const authInfo = process.env.REAL_AUTH_INFO;
 
@@ -29,10 +40,10 @@ function authHeaders(): HeadersInit {
   if (authInfo) {
     const h: Record<string, string> = {
       Accept: "application/json",
-      "real-device-type": process.env.REAL_DEVICE_TYPE ?? "",
-      "real-device-name": process.env.REAL_DEVICE_NAME ?? "",
-      "real-device-uuid": process.env.REAL_DEVICE_UUID ?? "",
-      "real-version": process.env.REAL_VERSION ?? "",
+      "real-device-type": process.env.REAL_DEVICE_TYPE ?? DEVICE_DEFAULTS.type,
+      "real-device-name": process.env.REAL_DEVICE_NAME ?? DEVICE_DEFAULTS.name,
+      "real-device-uuid": process.env.REAL_DEVICE_UUID ?? DEVICE_DEFAULTS.uuid,
+      "real-version": process.env.REAL_VERSION ?? DEVICE_DEFAULTS.version,
       "real-request-token": requestToken(),
       "real-auth-info": authInfo,
       Origin: "https://realapp.com",
