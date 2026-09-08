@@ -105,7 +105,6 @@ export interface DealFilters {
   players?: string[];
   minDiscountPct: number;
   auctionOnly: boolean;
-  maxPages: number;
 }
 
 export interface Deal {

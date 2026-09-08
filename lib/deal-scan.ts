@@ -19,12 +19,15 @@ import {
 
 const MAX_ELAPSED_MS = 9_000; // keep under Vercel's 10s default function limit
 const MAX_LOOKUPS = 45; // FMV + earnings lookups per scan
+const MAX_BUCKET_PAGES = 60; // safety ceiling per rarity/type bucket (10/page)
 
 /**
  * Scan a filtered slice of the marketplace for deals:
  *   - discount deal: price ≥ minDiscountPct below the FMV median, or
  *   - ROI deal (past seasons only): remaining OTD earnings > price.
- * Auctions-only by default, ending-soonest first, page-capped, time-boxed.
+ * Auctions-only by default, ending-soonest first. Each rarity/type bucket is
+ * paged until fully covered (the API's listingCount for that query) so the
+ * scanned count matches the market; time-boxed and page-capped for safety.
  * Returns best-first by upside (max of FMV gap / remaining margin).
  */
 export async function scanDeals(f: DealFilters): Promise<DealsResult> {
@@ -42,24 +45,29 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
     for (const rarity of f.rarities) {
       let cursor: string | undefined;
       let prevCursor = "";
-      for (let page = 0; page < f.maxPages; page++) {
+      let fetched = 0;
+      let bucketTotal = 0; // market count for this query, from the first page
+      for (let page = 0; page < MAX_BUCKET_PAGES; page++) {
         if (Date.now() - started > MAX_ELAPSED_MS) {
           timedOut = true;
           break outer;
         }
         let listings;
         try {
-          listings = await fetchMarketplaceListings({
+          const res = await fetchMarketplaceListings({
             sport: f.sport,
             season: f.season,
             rarity,
             listingType: ltype,
             beforeEndsAt: cursor,
           });
+          listings = res.listings;
+          bucketTotal = res.listingCount || bucketTotal;
         } catch {
           break; // page/rarity hiccup — move on
         }
         if (!listings.length) break;
+        fetched += listings.length;
         scanned += listings.length;
 
         for (const l of listings) {
@@ -135,6 +143,7 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
         );
         if (!cursor || cursor === prevCursor) break; // exhausted / no progress
         prevCursor = cursor;
+        if (bucketTotal > 0 && fetched >= bucketTotal) break; // bucket fully covered
       }
     }
   }

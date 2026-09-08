@@ -144,7 +144,6 @@ export default function ShopPanel() {
       minDisc: String(minDisc),
       auctions: auctions ? "1" : "0",
       players: players.trim(),
-      pages: "3",
     });
     try {
       const res = await fetch(`/api/deals?${params}`);
@@ -189,7 +188,6 @@ export default function ShopPanel() {
           players: s.players.join(", "),
           minDisc: String(minDisc),
           auctions: auctions ? "1" : "0",
-          pages: "3",
         });
         try {
           const res = await fetch(`/api/deals?${params}`);

@@ -199,13 +199,19 @@ async function mktFetch<T>(path: string): Promise<T> {
   return data;
 }
 
+export interface MarketplacePage {
+  listings: RawListing[];
+  /** Total listings matching this sport/season/rarity/type query (market count). */
+  listingCount: number;
+}
+
 export async function fetchMarketplaceListings(params: {
   sport: string;
   season: number;
   rarity: number;
   listingType: string;
   beforeEndsAt?: string;
-}): Promise<RawListing[]> {
+}): Promise<MarketplacePage> {
   const q = new URLSearchParams({
     sport: params.sport,
     season: String(params.season),
@@ -214,10 +220,10 @@ export async function fetchMarketplaceListings(params: {
     listingType: params.listingType,
   });
   if (params.beforeEndsAt) q.set("beforeEndsAt", params.beforeEndsAt);
-  const d = await mktFetch<{ listings?: RawListing[] }>(
+  const d = await mktFetch<{ listings?: RawListing[]; listingCount?: number }>(
     `/cardmarketplacelistings?${q}`
   );
-  return d.listings ?? [];
+  return { listings: d.listings ?? [], listingCount: d.listingCount ?? 0 };
 }
 
 export async function fetchFmvMedian(

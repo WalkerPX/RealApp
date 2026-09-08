@@ -58,7 +58,6 @@ export async function GET(req: NextRequest) {
 
   const minDiscountPct = Math.min(90, Math.max(0, Number(sp.get("minDisc") ?? 20)));
   const auctionOnly = sp.get("auctions") !== "0";
-  const maxPages = Math.min(6, Math.max(1, Number(sp.get("pages") ?? 3) || 3));
 
   const filters: DealFilters = {
     sport,
@@ -68,7 +67,6 @@ export async function GET(req: NextRequest) {
     players,
     minDiscountPct: Number.isFinite(minDiscountPct) ? minDiscountPct : 20,
     auctionOnly,
-    maxPages,
   };
 
   try {
