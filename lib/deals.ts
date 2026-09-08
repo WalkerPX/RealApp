@@ -82,6 +82,7 @@ export const WALKER_OTD_SLICES: WalkerOtdSlice[] = [
   { sport: "nfl", season: 2024, players: ["Saquon Barkley"] },
   { sport: "ncaaf", season: 2025, players: ["Kiael Kelly", "Eric Weatherly", "Fernando Mendoza", "Nick Minicucci", "Cam Cook"] },
   { sport: "ncaaf", season: 2024, players: ["Cam Skattebo", "Ashton Jeanty"] },
+  { sport: "ncaaf", season: 2023, players: ["Michael Wiley"] },
   { sport: "ncaam", season: 2026, players: ["Braden Smith", "Darius Acuff Jr.", "Bennett Stirtz", "Keaton Wagler", "Yaxel Lendeborg", "Cameron Boozer"] },
   { sport: "ncaam", season: 2025, players: ["Braden Smith", "Cooper Flagg", "Mark Sears", "Yaxel Lendeborg", "Johnie Broome"] },
   { sport: "ncaam", season: 2024, players: ["Zach Edey"] },
