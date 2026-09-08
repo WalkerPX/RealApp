@@ -17,8 +17,11 @@ function teamName(game: NonNullable<DashboardResponse["cards"][number]["game"]>,
 }
 
 // Real rarity → UI color (keep in sync with --rarity-* in globals.css):
-// Rare → orange · Epic → red/pink · Legendary → purple.
+// Rare → orange · Epic → red/pink · Legendary → purple · Mystic → gold ·
+// Iconic → pink.
 const RARITY_COLORS: Record<string, string> = {
+  iconic: "#f472b6",
+  mystic: "#f2c94c",
   legendary: "#7856ff",
   epic: "#d6409f",
   rare: "#e66200",
@@ -29,7 +32,7 @@ const RARITY_COLORS: Record<string, string> = {
 function rarityColor(label?: string | null): string {
   if (!label) return ICY_BLUE;
   const k = label.toLowerCase();
-  for (const key of ["legendary", "epic", "rare", "uncommon", "common"]) {
+  for (const key of ["iconic", "mystic", "legendary", "epic", "rare", "uncommon", "common"]) {
     if (k.includes(key)) return RARITY_COLORS[key];
   }
   return ICY_BLUE;

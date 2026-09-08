@@ -36,6 +36,8 @@ export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
 };
 
 export const RARITY_LABELS: Record<number, string> = {
+  1: "Common",
+  2: "Uncommon",
   3: "Rare",
   4: "Epic",
   5: "Legendary",

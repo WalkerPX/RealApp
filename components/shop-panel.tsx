@@ -14,6 +14,8 @@ import {
 
 // Keep in sync with app/globals.css --rarity-*.
 const RARITY_HEX: Record<string, string> = {
+  iconic: "#f472b6",
+  mystic: "#f2c94c",
   legendary: "#7856ff",
   epic: "#d6409f",
   rare: "#e66200",
@@ -24,7 +26,7 @@ const RARITY_HEX: Record<string, string> = {
 function rarityColor(label?: string | null): string {
   if (!label) return "#38bdf8";
   const k = label.toLowerCase();
-  for (const key of ["legendary", "epic", "rare", "uncommon", "common"]) {
+  for (const key of ["iconic", "mystic", "legendary", "epic", "rare", "uncommon", "common"]) {
     if (k.includes(key)) return RARITY_HEX[key];
   }
   return "#38bdf8";
@@ -173,14 +175,16 @@ export default function ShopPanel() {
           </label>
           <label>
             <span className="flabel">Min discount</span>
-            <input
-              type="number"
-              min={0}
-              max={90}
-              value={minDisc}
-              onChange={(e) => setMinDisc(Number(e.target.value) || 0)}
-            />
-            <span className="fsuffix">%</span>
+            <span className="numwrap">
+              <input
+                type="number"
+                min={0}
+                max={90}
+                value={minDisc}
+                onChange={(e) => setMinDisc(Number(e.target.value) || 0)}
+              />
+              <span className="pct">%</span>
+            </span>
           </label>
           <label className="check-inline">
             <input
@@ -207,7 +211,7 @@ export default function ShopPanel() {
             </label>
           ))}
           <span className="flabel rarity-label">Rarity</span>
-          {[7, 6, 5, 4, 3].map((r) => (
+          {[7, 6, 5, 4, 3, 2, 1].map((r) => (
             <label key={r} className={`opt-box ${rarities.includes(r) ? "on" : ""}`}>
               <input
                 type="checkbox"

@@ -12,7 +12,7 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const VALID_RARITIES = new Set([3, 4, 5, 6, 7]);
+const VALID_RARITIES = new Set([1, 2, 3, 4, 5, 6, 7]);
 const VALID_TYPES = new Set<DealListingType>(["userpassfull", "card"]);
 const ALL_SEASONS = new Set(
   Object.values(DEAL_SEASONS).flat()
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     .map((r) => Number(r))
     .filter((r) => VALID_RARITIES.has(r))
     .sort((a, b) => b - a);
-  if (!rarities.length) return err("No valid rarities (3..7)");
+  if (!rarities.length) return err("No valid rarities (1..7)");
 
   const playersRaw = sp.get("players") ?? "";
   const players = playersRaw
