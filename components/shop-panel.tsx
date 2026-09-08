@@ -48,9 +48,11 @@ interface DealsResponse {
 const SPORT_TAG: Record<DealSport, string> = {
   mlb: "MLB",
   wnba: "WNBA",
+  nba: "NBA",
   ncaaf: "CFB",
   ncaam: "CBB",
   nfl: "NFL",
+  nhl: "NHL",
   soccer: "FC",
 };
 
