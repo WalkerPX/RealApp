@@ -162,6 +162,26 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
+  // Hidden tools (shop: "wlkr OTD scan" + tracked-player menu) — revealed by
+  // clicking the word "Made" in the footer. Defaults off; remembers last state.
+  const [devTools, setDevTools] = useState(false);
+
+  useEffect(() => {
+    try {
+      setDevTools(window.localStorage.getItem("wlkr.devTools") === "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (devTools) window.localStorage.setItem("wlkr.devTools", "1");
+      else window.localStorage.removeItem("wlkr.devTools");
+    } catch {
+      /* ignore */
+    }
+  }, [devTools]);
 
   const run = useCallback(async () => {
     const u = username.trim();
@@ -260,7 +280,7 @@ export default function Page() {
       </div>
 
       {view === "shop" ? (
-        <ShopPanel />
+        <ShopPanel showTools={devTools} />
       ) : (
         <>
           {error && <div className="error-banner">{error}</div>}
@@ -312,7 +332,16 @@ export default function Page() {
       )}
 
       <p className="foot">
-        Made by <a href="https://www.realapp.com/u/walkr" target="_blank" rel="noreferrer">@walkr</a> on real
+        <button
+          type="button"
+          className="foot-made"
+          onClick={() => setDevTools((v) => !v)}
+          aria-label="toggle hidden tools"
+          tabIndex={0}
+        >
+          Made
+        </button>{" "}
+        by <a href="https://www.realapp.com/u/walkr" target="_blank" rel="noreferrer">@walkr</a> on real
       </p>
     </main>
   );

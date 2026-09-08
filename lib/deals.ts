@@ -8,7 +8,7 @@
  * only that slice, time-boxed (~20s) with in-memory FMV caching.
  */
 
-export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "soccer";
+export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "golf" | "soccer";
 export type DealListingType = "userpassfull" | "card";
 
 export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
@@ -20,14 +20,17 @@ export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
   { id: "nfl", label: "NFL" },
   { id: "nhl", label: "NHL" },
   { id: "soccer", label: "FC" },
+  { id: "golf", label: "Golf" },
 ];
 
 /** Season per sport (API stores every season as its starting year). */
 export const DEAL_SEASONS: Record<DealSport, number[]> = {
-  mlb: [2026, 2025, 2024],
+  // MLB verified live bulk listings: 2024-2026 (current), 2023 (1+), 2022 (5+); 2021 has none.
+  mlb: [2026, 2025, 2024, 2023, 2022],
   wnba: [2026, 2025, 2024],
-  // NBA keys by ENDING year like CBB (param 2026 = the 2025-26 set).
-  nba: [2026, 2025, 2024],
+  // NBA keys by ENDING year like CBB (param 2026 = the 2025-26 set). 2023
+  // (2022-23) has live listings; 2022 (2021-22) has none.
+  nba: [2026, 2025, 2024, 2023],
   ncaaf: [2026, 2025, 2024, 2023],
   // CBB is keyed by ENDING year: season param 2026 = the 2025-26 set (Real
   // stores CBB as "2025-26" cards; cf. ncaaf which is starting-year 2026 =
@@ -37,6 +40,9 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   // NHL keys by STARTING year (2025 = 2025-26); 2026-27 has no cards yet.
   nhl: [2025, 2024, 2023],
   soccer: [2025],
+  // Golf keys by calendar year (like MLB/WNBA). Live bulk listings verified:
+  // 2026 (heavy), 2025/2024/2023 (a few); 2022 and older have none.
+  golf: [2026, 2025, 2024, 2023],
 };
 
 /** Seasons still in progress — cards have no future OTD claim dates yet, so
@@ -45,6 +51,7 @@ export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
   mlb: 2026,
   wnba: 2026,
   ncaaf: 2026,
+  golf: 2026,
 };
 
 export const RARITY_LABELS: Record<number, string> = {
@@ -58,7 +65,8 @@ export const RARITY_LABELS: Record<number, string> = {
 };
 
 export function seasonLabel(sport: DealSport, season: number): string {
-  if (sport === "mlb" || sport === "wnba") return String(season);
+  // MLB/WNBA/Golf key by calendar year.
+  if (sport === "mlb" || sport === "wnba" || sport === "golf") return String(season);
   // CBB/NBA key by ending year (2026 = 2025-26); everyone else keys by start.
   if (sport === "ncaam" || sport === "nba") return `${season - 1}-${String(season).slice(-2)}`;
   return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
@@ -95,6 +103,62 @@ export const WALKER_OTD_SLICES: WalkerOtdSlice[] = [
   { sport: "ncaam", season: 2023, players: ["Zach Edey", "Drew Timme", "Trayce Jackson-Davis"] },
   { sport: "nba", season: 2024, players: ["Buddy Hield"] }, // 2024 = 2023-24 (ending-year key)
 ];
+
+/** One selectable player occurrence in the tracked-player menu:
+ * `sport|season|player` — unique per (sport, season) group. */
+export function walkerOtdKey(sport: DealSport, season: number, player: string): string {
+  return `${sport}|${season}|${player}`;
+}
+
+export interface WalkerOtdMenuPlayer {
+  name: string;
+  key: string;
+}
+
+export interface WalkerOtdMenuSeason {
+  season: number;
+  label: string;
+  players: WalkerOtdMenuPlayer[];
+}
+
+export interface WalkerOtdMenuSport {
+  sport: DealSport;
+  label: string;
+  seasons: WalkerOtdMenuSeason[];
+}
+
+/** Players from WALKER_OTD_SLICES grouped by sport, then season (slice
+ * order preserved, players de-duped per season). */
+export function walkerOtdMenu(): WalkerOtdMenuSport[] {
+  const sports: WalkerOtdMenuSport[] = [];
+  const seenSport = new Map<DealSport, WalkerOtdMenuSport>();
+  for (const s of WALKER_OTD_SLICES) {
+    let sportGroup = seenSport.get(s.sport);
+    if (!sportGroup) {
+      const label = DEAL_SPORTS.find((d) => d.id === s.sport)?.label ?? s.sport;
+      sportGroup = { sport: s.sport, label, seasons: [] };
+      seenSport.set(s.sport, sportGroup);
+      sports.push(sportGroup);
+    }
+    let seasonGroup = sportGroup.seasons.find((g) => g.season === s.season);
+    if (!seasonGroup) {
+      seasonGroup = {
+        season: s.season,
+        label: seasonLabel(s.sport, s.season),
+        players: [],
+      };
+      sportGroup.seasons.push(seasonGroup);
+    }
+    for (const p of s.players) {
+      if (seasonGroup.players.some((x) => x.name === p)) continue;
+      seasonGroup.players.push({
+        name: p,
+        key: walkerOtdKey(s.sport, s.season, p),
+      });
+    }
+  }
+  return sports;
+}
 
 export interface DealFilters {
   sport: DealSport;
