@@ -233,7 +233,7 @@ export default function ShopPanel() {
             <input
               value={players}
               onChange={(e) => setPlayers(e.target.value)}
-              placeholder="Optional — e.g. Ben Rice, A'ja Wilson (comma separated)"
+              placeholder="Optional — e.g. Gunnar Henderson, Blaze Alexander (comma separated)"
               spellCheck={false}
             />
           </label>

@@ -84,16 +84,22 @@ button {
 }
 
 .toplink {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
   text-decoration: none;
-  transition: color 0.15s;
+  transition: opacity 0.15s;
+}
+
+.toplogo {
+  height: 46px;
+  width: 46px;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 .toplink:hover {
-  color: var(--accent-soft);
+  opacity: 0.8;
 }
 
 .panel {

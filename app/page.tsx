@@ -203,8 +203,9 @@ export default function Page() {
           href="https://www.realapp.com/u/walkr"
           target="_blank"
           rel="noreferrer"
+          title="@walkr on real"
         >
-          @walkr on real
+          <img className="toplogo" src="/wlogo.png" alt="@walkr" />
         </a>
       </header>
 
