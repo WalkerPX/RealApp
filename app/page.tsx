@@ -42,7 +42,7 @@ function rarityColor(label?: string | null): string {
 // icy theme accent rather than implying a rarity.
 const ICY_BLUE = "#38bdf8";
 
-function CardView({ c }: { c: DashboardCard }) {
+function CardView({ c, sport }: { c: DashboardCard; sport: Sport }) {
   const { pass } = c;
   const passTeamId =
     pass.entityType === "team"
@@ -125,9 +125,11 @@ function CardView({ c }: { c: DashboardCard }) {
             {" · "}
             {c.suggestedBooster.remainingCount} in stock
           </div>
-          <a href={realBoostUrl(pass.entity.id)} target="_blank" rel="noreferrer">
-            Boost on Real →
-          </a>
+          {sport === "mlb" && (
+            <a href={realBoostUrl(pass.entity.id)} target="_blank" rel="noreferrer">
+              Boost on Real →
+            </a>
+          )}
         </div>
       )}
 
@@ -288,7 +290,7 @@ export default function Page() {
                     </h2>
                     <div className="grid">
                       {cards.map((c) => (
-                        <CardView key={c.pass.id} c={c} />
+                        <CardView key={c.pass.id} c={c} sport={sport} />
                       ))}
                     </div>
                   </section>

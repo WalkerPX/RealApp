@@ -132,11 +132,15 @@ export async function getBoosterInventory(
   return data.boosterCardInfo ?? { rarityGroups: [] };
 }
 
-export async function getTodaysSchedule(sport: Sport): Promise<Game[]> {
-  const data = await realFetch<{ latestDayContent: { games?: Game[] } }>(
-    `/home/${sport}/next?cohort=0`
-  );
-  return data.latestDayContent?.games ?? [];
+export async function getTodaysSchedule(sport: Sport): Promise<{
+  day: string;
+  games: Game[];
+}> {
+  const data = await realFetch<{
+    latestDayContent: { day?: string; games?: Game[] };
+  }>(`/home/${sport}/next?cohort=0`);
+  const l = data.latestDayContent ?? {};
+  return { day: l.day ?? "", games: l.games ?? [] };
 }
 
 /** Real's share-link encoder (salt "routing", min length 11). Player booster

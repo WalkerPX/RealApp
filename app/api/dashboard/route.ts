@@ -15,6 +15,7 @@ import {
   type MlbPlayerStats,
 } from "@/lib/mlb";
 import { planBoosts, type PlayerRole } from "@/lib/boost-plan";
+import { buildWnbaDashboard } from "@/lib/wnba-dash";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -100,8 +101,11 @@ export async function GET(req: NextRequest) {
   if (!SPORT_IDS.has(sport)) {
     return NextResponse.json({ error: `Unsupported sport "${sportRaw}"` }, { status: 400 });
   }
-  if (sport !== "mlb") {
-    return NextResponse.json({ error: "Only MLB is implemented so far" }, { status: 400 });
+  if (sport !== "mlb" && sport !== "wnba") {
+    return NextResponse.json(
+      { error: "Only MLB and WNBA are implemented so far" },
+      { status: 400 }
+    );
   }
 
   try {
@@ -118,10 +122,11 @@ export async function GET(req: NextRequest) {
     const season = new Date().getFullYear();
     const isSelf = sessionUserId() !== null && sessionUserId() === user.id;
 
-    const [allPasses, realGames] = await Promise.all([
+    const [allPasses, sched] = await Promise.all([
       getUserPasses(user.id, sport, season),
       getTodaysSchedule(sport),
     ]);
+    const realGames = sched.games;
 
     // Team ids that play today (Real + MLB share team id space)
     const teamsById = new Map<number, (typeof realGames)[number]>();
@@ -131,109 +136,118 @@ export async function GET(req: NextRequest) {
     }
     const playingTeamPasses = allPasses.filter((p) => teamsById.has(teamIdOf(p)));
 
-    // ── MLB reality / projection layer ──────────────────────────
-    const mlbGames = await getTodaysMlbGames(day);
-    const mlbByTeam = new Map<number, (typeof mlbGames)[number]>();
-    for (const g of mlbGames) {
-      mlbByTeam.set(g.homeTeamId, g);
-      mlbByTeam.set(g.awayTeamId, g);
-    }
-    const probableByTeam = new Map<number, number>();
-    for (const g of mlbGames) {
-      if (g.homeProbable) probableByTeam.set(g.homeTeamId, g.homeProbable);
-      if (g.awayProbable) probableByTeam.set(g.awayTeamId, g.awayProbable);
-    }
-
-    // Per-team MLB player pool: boxscore when started, roster when scheduled.
-    const playerPool = new Map<number, { players: Map<number, MlbPlayerStats>; played: Set<number>; status: string; lineupTbd: boolean }>();
-    const wantedTeams = new Set(playingTeamPasses.map(teamIdOf).filter((t) => mlbByTeam.has(t)));
-    const teamsByStatus = new Map<number, string>();
-    for (const teamId of wantedTeams) teamsByStatus.set(teamId, mlbByTeam.get(teamId)!.status);
-
-    const finalOrLive = [...teamsByStatus.entries()].filter(([, s]) => !UPCOMING.has(s));
-    await Promise.all(
-      finalOrLive.map(async ([teamId, status]) => {
-        const game = mlbByTeam.get(teamId)!;
-        const box = await getBoxScore(game.gamePk, status);
-        if (box && box.players.size > 0) {
-          playerPool.set(teamId, { players: box.players, played: box.playedIds, status, lineupTbd: false });
-        } else {
-          playerPool.set(teamId, { players: new Map(), played: new Set(), status, lineupTbd: true });
-        }
-      })
-    );
-    const scheduledTeams = [...teamsByStatus.entries()].filter(([, s]) => UPCOMING.has(s));
-    await Promise.all(
-      scheduledTeams.map(async ([teamId, status]) => {
-        const roster = await getRoster(teamId);
-        playerPool.set(teamId, { players: roster, played: new Set(), status, lineupTbd: true });
-      })
-    );
-
+    // ── per-sport reality / projection layer ──────────────────
     const cards: DashboardCard[] = [];
     const candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean; kTop25?: boolean }[] = [];
+    let respDay = day;
 
-    // Elite strikeout arms — only they may get K booster suggestions.
-    const topK9 = isSelf ? await getTopK9Ids(season) : new Set<number>();
-
-    for (const pass of playingTeamPasses) {
-      const teamId = teamIdOf(pass);
-      const realGame = teamsById.get(teamId) ?? null;
-      const opponent = realGame
-        ? realGame.homeTeamId === teamId
-          ? realGame.awayTeam
-          : realGame.homeTeam
-        : null;
-      const pool = playerPool.get(teamId);
-
-      // Team passes: show whenever their team plays; no lineup concept.
-      if (pass.entityType === "team") {
-        if (pool) {
-          cards.push({ pass, game: realGame, opponent, role: "team", score: null, lineupTbd: false, suggestedBooster: null });
-        }
-        continue;
+    if (sport === "mlb") {
+      const mlbGames = await getTodaysMlbGames(day);
+      const mlbByTeam = new Map<number, (typeof mlbGames)[number]>();
+      for (const g of mlbGames) {
+        mlbByTeam.set(g.homeTeamId, g);
+        mlbByTeam.set(g.awayTeamId, g);
+      }
+      const probableByTeam = new Map<number, number>();
+      for (const g of mlbGames) {
+        if (g.homeProbable) probableByTeam.set(g.homeTeamId, g.homeProbable);
+        if (g.awayProbable) probableByTeam.set(g.awayTeamId, g.awayProbable);
       }
 
-      // Players: hurt? → skip. Not on a real MLB team today? → skip.
-      if (!pool || !mlbByTeam.has(teamId)) continue;
-      const injury = pass.entity.injuryStatus?.toLowerCase();
-      if (injury && injury !== "active" && injury !== "available") continue;
+      // Per-team MLB player pool: boxscore when started, roster when scheduled.
+      const playerPool = new Map<number, { players: Map<number, MlbPlayerStats>; played: Set<number>; status: string; lineupTbd: boolean }>();
+      const wantedTeams = new Set(playingTeamPasses.map(teamIdOf).filter((t) => mlbByTeam.has(t)));
+      const teamsByStatus = new Map<number, string>();
+      for (const teamId of wantedTeams) teamsByStatus.set(teamId, mlbByTeam.get(teamId)!.status);
 
-      const isTwoWay = (pass.infoDetail ?? "").toUpperCase() === "TWP";
-      const mlbPlayer = findMlbPlayer(pool.players, pass);
-      if (!mlbPlayer) continue; // not on active roster / no MLB data
+      const finalOrLive = [...teamsByStatus.entries()].filter(([, s]) => !UPCOMING.has(s));
+      await Promise.all(
+        finalOrLive.map(async ([teamId, status]) => {
+          const game = mlbByTeam.get(teamId)!;
+          const box = await getBoxScore(game.gamePk, status);
+          if (box && box.players.size > 0) {
+            playerPool.set(teamId, { players: box.players, played: box.playedIds, status, lineupTbd: false });
+          } else {
+            playerPool.set(teamId, { players: new Map(), played: new Set(), status, lineupTbd: true });
+          }
+        })
+      );
+      const scheduledTeams = [...teamsByStatus.entries()].filter(([, s]) => UPCOMING.has(s));
+      await Promise.all(
+        scheduledTeams.map(async ([teamId, status]) => {
+          const roster = await getRoster(teamId);
+          playerPool.set(teamId, { players: roster, played: new Set(), status, lineupTbd: true });
+        })
+      );
 
-      const realPosPitcher = (pass.infoDetail ?? "").toUpperCase() === "P";
-      const posPitcher = !isTwoWay && (realPosPitcher || mlbPlayer.posAbbr === "P");
-      const finalRole: PlayerRole = posPitcher ? "pitcher" : "hitter";
-      let projected = false;
-      let lineupTbd = false;
-      let score = 0;
+      // Elite strikeout arms — only they may get K booster suggestions.
+      const topK9 = isSelf ? await getTopK9Ids(season) : new Set<number>();
 
-      if (!UPCOMING.has(pool.status)) {
-        projected = pool.played.has(mlbPlayer.id);
-        lineupTbd = pool.played.size === 0; // game not started yet
-        if (projected) score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
-        if (!projected && pool.played.size === 0) {
-          // Game live/final but nobody listed yet (weather etc.) — keep roster fallback
-          projected = mlbPlayer.statusCode === "A";
-          lineupTbd = true;
+      for (const pass of playingTeamPasses) {
+        const teamId = teamIdOf(pass);
+        const realGame = teamsById.get(teamId) ?? null;
+        const opponent = realGame
+          ? realGame.homeTeamId === teamId
+            ? realGame.awayTeam
+            : realGame.homeTeam
+          : null;
+        const pool = playerPool.get(teamId);
+
+        // Team passes: show whenever their team plays; no lineup concept.
+        if (pass.entityType === "team") {
+          if (pool) {
+            cards.push({ pass, game: realGame, opponent, role: "team", score: null, lineupTbd: false, suggestedBooster: null });
+          }
+          continue;
+        }
+
+        // Players: hurt? → skip. Not on a real MLB team today? → skip.
+        if (!pool || !mlbByTeam.has(teamId)) continue;
+        const injury = pass.entity.injuryStatus?.toLowerCase();
+        if (injury && injury !== "active" && injury !== "available") continue;
+
+        const isTwoWay = (pass.infoDetail ?? "").toUpperCase() === "TWP";
+        const mlbPlayer = findMlbPlayer(pool.players, pass);
+        if (!mlbPlayer) continue; // not on active roster / no MLB data
+
+        const realPosPitcher = (pass.infoDetail ?? "").toUpperCase() === "P";
+        const posPitcher = !isTwoWay && (realPosPitcher || mlbPlayer.posAbbr === "P");
+        const finalRole: PlayerRole = posPitcher ? "pitcher" : "hitter";
+        let projected = false;
+        let lineupTbd = false;
+        let score = 0;
+
+        if (!UPCOMING.has(pool.status)) {
+          projected = pool.played.has(mlbPlayer.id);
+          lineupTbd = pool.played.size === 0; // game not started yet
+          if (projected) score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
+          if (!projected && pool.played.size === 0) {
+            // Game live/final but nobody listed yet (weather etc.) — keep roster fallback
+            projected = mlbPlayer.statusCode === "A";
+            lineupTbd = true;
+            score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
+          }
+        } else {
+          if (mlbPlayer.statusCode !== "A") continue; // IL/minors
+          if (finalRole === "pitcher") {
+            projected = probableByTeam.get(teamId) === mlbPlayer.id; // only the starter
+          } else {
+            projected = true; // lineup not posted yet
+            lineupTbd = true;
+          }
           score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
         }
-      } else {
-        if (mlbPlayer.statusCode !== "A") continue; // IL/minors
-        if (finalRole === "pitcher") {
-          projected = probableByTeam.get(teamId) === mlbPlayer.id; // only the starter
-        } else {
-          projected = true; // lineup not posted yet
-          lineupTbd = true;
-        }
-        score = finalRole === "pitcher" ? pitcherScore(mlbPlayer.pit!) : batterScore(mlbPlayer.bat!);
-      }
 
-      if (!projected) continue;
-      cards.push({ pass, game: realGame, opponent, role: finalRole, score, lineupTbd, suggestedBooster: null });
-      if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score, boosted: pass.boostInfo.isCardBoosted === true, kTop25: finalRole === "pitcher" && topK9.has(mlbPlayer.id) });
+        if (!projected) continue;
+        cards.push({ pass, game: realGame, opponent, role: finalRole, score, lineupTbd, suggestedBooster: null });
+        if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score, boosted: pass.boostInfo.isCardBoosted === true, kTop25: finalRole === "pitcher" && topK9.has(mlbPlayer.id) });
+      }
+    } else {
+      // ── WNBA layer (ESPN mapping; no pitchers — all hitters) ──
+      const wn = await buildWnbaDashboard(allPasses, sched, isSelf);
+      respDay = wn.day;
+      for (const c of wn.cards) cards.push(c);
+      for (const c of wn.candidates) candidates.push(c);
     }
 
     // ── Booster plan (own account only: inventory is session-scoped) ──
@@ -258,7 +272,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       user,
       sport,
-      day,
+      day: respDay,
       cards,
       totalOwned: allPasses.length,
       projectedCount: cards.filter((c) => c.role !== "team").length,

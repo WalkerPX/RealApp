@@ -6,7 +6,7 @@ export const SUPPORTED_SPORTS: {
   implemented: boolean;
 }[] = [
   { id: "mlb", label: "MLB", implemented: true },
-  { id: "wnba", label: "WNBA", implemented: false },
+  { id: "wnba", label: "WNBA", implemented: true },
   { id: "cfb", label: "CFB", implemented: false },
   { id: "nfl", label: "NFL", implemented: false },
   { id: "nhl", label: "NHL", implemented: false },
