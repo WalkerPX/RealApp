@@ -8,15 +8,17 @@
  * only that slice, time-boxed (~20s) with in-memory FMV caching.
  */
 
-export type DealSport = "nfl" | "ncaaf" | "ncaam" | "mlb" | "wnba" | "soccer";
+export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "soccer";
 export type DealListingType = "userpassfull" | "card";
 
 export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
   { id: "mlb", label: "MLB" },
   { id: "wnba", label: "WNBA" },
+  { id: "nba", label: "NBA" },
   { id: "ncaaf", label: "CFB" },
   { id: "ncaam", label: "CBB" },
   { id: "nfl", label: "NFL" },
+  { id: "nhl", label: "NHL" },
   { id: "soccer", label: "FC" },
 ];
 
@@ -24,12 +26,16 @@ export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
 export const DEAL_SEASONS: Record<DealSport, number[]> = {
   mlb: [2026, 2025, 2024],
   wnba: [2026, 2025, 2024],
+  // NBA keys by ENDING year like CBB (param 2026 = the 2025-26 set).
+  nba: [2026, 2025, 2024],
   ncaaf: [2026, 2025, 2024, 2023],
   // CBB is keyed by ENDING year: season param 2026 = the 2025-26 set (Real
   // stores CBB as "2025-26" cards; cf. ncaaf which is starting-year 2026 =
   // 2026-27). 2026-27 (param 2027) has no cards until the season launches.
   ncaam: [2026, 2025, 2024],
   nfl: [2025, 2024],
+  // NHL keys by STARTING year (2025 = 2025-26); 2026-27 has no cards yet.
+  nhl: [2025, 2024, 2023],
   soccer: [2025],
 };
 
@@ -53,8 +59,8 @@ export const RARITY_LABELS: Record<number, string> = {
 
 export function seasonLabel(sport: DealSport, season: number): string {
   if (sport === "mlb" || sport === "wnba") return String(season);
-  // CBB keys by ending year (2026 = 2025-26); everyone else keys by start.
-  if (sport === "ncaam") return `${season - 1}-${String(season).slice(-2)}`;
+  // CBB/NBA key by ending year (2026 = 2025-26); everyone else keys by start.
+  if (sport === "ncaam" || sport === "nba") return `${season - 1}-${String(season).slice(-2)}`;
   return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
 }
 
