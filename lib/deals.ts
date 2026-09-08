@@ -33,7 +33,7 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   // stores CBB as "2025-26" cards; cf. ncaaf which is starting-year 2026 =
   // 2026-27). 2026-27 (param 2027) has no cards until the season launches.
   ncaam: [2026, 2025, 2024],
-  nfl: [2025, 2024],
+  nfl: [2025, 2024, 2023],
   // NHL keys by STARTING year (2025 = 2025-26); 2026-27 has no cards yet.
   nhl: [2025, 2024, 2023],
   soccer: [2025],
