@@ -25,7 +25,10 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   mlb: [2026, 2025, 2024],
   wnba: [2026, 2025, 2024],
   ncaaf: [2026, 2025, 2024, 2023],
-  ncaam: [2026, 2025, 2024, 2023],
+  // CBB is keyed by ENDING year: season param 2026 = the 2025-26 set (Real
+  // stores CBB as "2025-26" cards; cf. ncaaf which is starting-year 2026 =
+  // 2026-27). 2026-27 (param 2027) has no cards until the season launches.
+  ncaam: [2026, 2025, 2024],
   nfl: [2025, 2024],
   soccer: [2025],
 };
@@ -50,6 +53,8 @@ export const RARITY_LABELS: Record<number, string> = {
 
 export function seasonLabel(sport: DealSport, season: number): string {
   if (sport === "mlb" || sport === "wnba") return String(season);
+  // CBB keys by ending year (2026 = 2025-26); everyone else keys by start.
+  if (sport === "ncaam") return `${season - 1}-${String(season).slice(-2)}`;
   return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
 }
 
