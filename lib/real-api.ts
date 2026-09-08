@@ -16,6 +16,21 @@ import {
 
 const BASE = "https://web.realapp.com";
 
+/** Dashboard sport ids → Real API sport keys. Most match; CFB and soccer
+ * differ (the API uses ncaaf/soccer, the app's own tabs are cfb/fc). */
+const REAL_SPORT_KEY: Record<Sport, string> = {
+  mlb: "mlb",
+  wnba: "wnba",
+  cfb: "ncaaf",
+  nfl: "nfl",
+  nhl: "nhl",
+  fc: "soccer",
+};
+
+function realSportKey(sport: Sport): string {
+  return REAL_SPORT_KEY[sport] ?? sport;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Auth. Real's web app requires a logged-in session. Two supported modes:
 //
@@ -110,7 +125,7 @@ export async function getUserPasses(
   season: number
 ): Promise<UserPass[]> {
   const data = await realFetch<{ passes: UserPass[] }>(
-    `/userpasses/${encodeURIComponent(userId)}/passes?sport=${sport}&season=${season}`
+    `/userpasses/${encodeURIComponent(userId)}/passes?sport=${realSportKey(sport)}&season=${season}`
   );
   return data.passes ?? [];
 }
@@ -127,7 +142,7 @@ export async function getBoosterInventory(
   sport: Sport
 ): Promise<BoosterInventory> {
   const data = await realFetch<{ boosterCardInfo: BoosterInventory }>(
-    `/userpassboostercards/${anchorPassId}/entity/player?displayType=userpass&sport=${sport}&version=stat`
+    `/userpassboostercards/${anchorPassId}/entity/player?displayType=userpass&sport=${realSportKey(sport)}&version=stat`
   );
   return data.boosterCardInfo ?? { rarityGroups: [] };
 }
@@ -138,7 +153,7 @@ export async function getTodaysSchedule(sport: Sport): Promise<{
 }> {
   const data = await realFetch<{
     latestDayContent: { day?: string; games?: Game[] };
-  }>(`/home/${sport}/next?cohort=0`);
+  }>(`/home/${realSportKey(sport)}/next?cohort=0`);
   const l = data.latestDayContent ?? {};
   return { day: l.day ?? "", games: l.games ?? [] };
 }

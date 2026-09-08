@@ -16,6 +16,7 @@ import {
 } from "@/lib/mlb";
 import { planBoosts, type PlayerRole } from "@/lib/boost-plan";
 import { buildWnbaDashboard } from "@/lib/wnba-dash";
+import { buildCfbDashboard } from "@/lib/cfb-dash";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -101,9 +102,9 @@ export async function GET(req: NextRequest) {
   if (!SPORT_IDS.has(sport)) {
     return NextResponse.json({ error: `Unsupported sport "${sportRaw}"` }, { status: 400 });
   }
-  if (sport !== "mlb" && sport !== "wnba") {
+  if (sport !== "mlb" && sport !== "wnba" && sport !== "cfb") {
     return NextResponse.json(
-      { error: "Only MLB and WNBA are implemented so far" },
+      { error: "Only MLB, WNBA and CFB are implemented so far" },
       { status: 400 }
     );
   }
@@ -242,12 +243,18 @@ export async function GET(req: NextRequest) {
         cards.push({ pass, game: realGame, opponent, role: finalRole, score, lineupTbd, suggestedBooster: null });
         if (isSelf) candidates.push({ passId: pass.id, role: finalRole, score, boosted: pass.boostInfo.isCardBoosted === true, kTop25: finalRole === "pitcher" && topK9.has(mlbPlayer.id) });
       }
-    } else {
+    } else if (sport === "wnba") {
       // ── WNBA layer (ESPN mapping; no pitchers — all hitters) ──
       const wn = await buildWnbaDashboard(allPasses, sched, isSelf);
       respDay = wn.day;
       for (const c of wn.cards) cards.push(c);
       for (const c of wn.candidates) candidates.push(c);
+    } else {
+      // ── CFB layer (ESPN mapping by abbreviation/name; all players) ──
+      const cf = await buildCfbDashboard(allPasses, sched, isSelf);
+      respDay = cf.day;
+      for (const c of cf.cards) cards.push(c);
+      for (const c of cf.candidates) candidates.push(c);
     }
 
     // ── Booster plan (own account only: inventory is session-scoped) ──

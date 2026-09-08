@@ -23,7 +23,7 @@ export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
 export const DEAL_SEASONS: Record<DealSport, number[]> = {
   mlb: [2026, 2025, 2024],
   wnba: [2026, 2025, 2024],
-  ncaaf: [2025, 2024, 2023],
+  ncaaf: [2026, 2025, 2024, 2023],
   nfl: [2025, 2024],
   soccer: [2025],
 };
@@ -33,6 +33,7 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
 export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
   mlb: 2026,
   wnba: 2026,
+  ncaaf: 2026,
 };
 
 export const RARITY_LABELS: Record<number, string> = {

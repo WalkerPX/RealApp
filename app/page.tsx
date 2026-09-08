@@ -148,6 +148,13 @@ const GROUP_TITLES: Record<PlayerRole, string> = {
   team: "Teams",
 };
 
+// Football/basketball have no pitcher bucket — a flat "Players" group reads
+// better than "Position Players" there.
+function roleTitle(sport: Sport, role: PlayerRole): string {
+  if (sport !== "mlb" && role === "hitter") return "Players";
+  return GROUP_TITLES[role];
+}
+
 export default function Page() {
   const [view, setView] = useState<"boost" | "shop">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
@@ -285,7 +292,7 @@ export default function Page() {
                 return (
                   <section className="group" key={role}>
                     <h2 className="group-title">
-                      {GROUP_TITLES[role]}
+                      {roleTitle(sport, role)}
                       <span className="count">{cards.length}</span>
                     </h2>
                     <div className="grid">
