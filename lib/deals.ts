@@ -8,13 +8,14 @@
  * only that slice, time-boxed (~20s) with in-memory FMV caching.
  */
 
-export type DealSport = "nfl" | "ncaaf" | "mlb" | "wnba" | "soccer";
+export type DealSport = "nfl" | "ncaaf" | "ncaam" | "mlb" | "wnba" | "soccer";
 export type DealListingType = "userpassfull" | "card";
 
 export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
   { id: "mlb", label: "MLB" },
   { id: "wnba", label: "WNBA" },
   { id: "ncaaf", label: "CFB" },
+  { id: "ncaam", label: "CBB" },
   { id: "nfl", label: "NFL" },
   { id: "soccer", label: "FC" },
 ];
@@ -24,6 +25,7 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   mlb: [2026, 2025, 2024],
   wnba: [2026, 2025, 2024],
   ncaaf: [2026, 2025, 2024, 2023],
+  ncaam: [2026, 2025, 2024, 2023],
   nfl: [2025, 2024],
   soccer: [2025],
 };
