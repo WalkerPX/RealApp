@@ -1,12 +1,13 @@
 /**
  * Tiny shared ESPN fetch helper (public feeds, no key). Same TTL-cache pattern
  * as lib/mlb.ts / lib/wnba.ts — used by the CFB pipeline.
+ *
+ * Header note: ESPN's WAF 403s browser-ish and bare Node user agents on
+ * site.api.espn.com from server IPs — a curl UA passes. Keep it that way.
  */
 const ESPN_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+  "User-Agent": "curl/8.5.0",
   Accept: "application/json",
-  Referer: "https://www.espn.com/",
 };
 
 const cache = new Map<string, { t: number; v: unknown }>();

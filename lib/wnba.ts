@@ -42,12 +42,9 @@ async function espnFetch<T>(url: string, ttlMs: number): Promise<T> {
   const hit = cache.get(url);
   if (hit && hit.t > Date.now()) return hit.v as T;
   const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-      Accept: "application/json",
-      Referer: "https://www.espn.com/",
-    },
+    // ESPN's WAF 403s browser-ish/bare Node UAs on site.api.espn.com from
+    // server IPs; a curl UA passes (same fix as lib/espn.ts).
+    headers: { "User-Agent": "curl/8.5.0", Accept: "application/json" },
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`ESPN ${new URL(url).pathname} -> ${res.status}`);
