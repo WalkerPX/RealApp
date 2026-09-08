@@ -66,6 +66,28 @@ export const LISTING_TYPE_META: Record<
   card: { label: "Play cards", short: "PLAY" },
 };
 
+/** One wlkr-OTD scan slice: a sport/season bucket + the players to watch for
+ * (rare→iconic bulk passes). Mirrors the tracker's major-sale watchlist. */
+export interface WalkerOtdSlice {
+  sport: DealSport;
+  season: number;
+  players: string[];
+}
+
+export const WALKER_OTD_SLICES: WalkerOtdSlice[] = [
+  { sport: "mlb", season: 2025, players: ["Ben Rice", "Shohei Ohtani"] },
+  { sport: "wnba", season: 2025, players: ["Gabby Williams", "Erica Wheeler", "A'ja Wilson"] },
+  { sport: "soccer", season: 2025, players: ["Kylian Mbappe", "Lamine Yamal", "Michael Olise", "Erling Haaland", "Harry Kane", "Lionel Messi"] },
+  { sport: "nfl", season: 2025, players: ["Christian McCaffrey"] },
+  { sport: "nfl", season: 2024, players: ["Saquon Barkley"] },
+  { sport: "ncaaf", season: 2025, players: ["Kiael Kelly", "Eric Weatherly", "Fernando Mendoza", "Nick Minicucci", "Cam Cook"] },
+  { sport: "ncaaf", season: 2024, players: ["Cam Skattebo", "Ashton Jeanty"] },
+  { sport: "ncaam", season: 2026, players: ["Braden Smith", "Darius Acuff Jr.", "Bennett Stirtz", "Keaton Wagler", "Yaxel Lendeborg", "Cameron Boozer"] },
+  { sport: "ncaam", season: 2025, players: ["Braden Smith", "Cooper Flagg", "Mark Sears", "Yaxel Lendeborg", "Johnie Broome"] },
+  { sport: "ncaam", season: 2024, players: ["Zach Edey"] },
+  { sport: "ncaam", season: 2023, players: ["Zach Edey", "Drew Timme", "Trayce Jackson-Davis"] },
+];
+
 export interface DealFilters {
   sport: DealSport;
   season: number;

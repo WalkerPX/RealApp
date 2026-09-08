@@ -765,3 +765,17 @@ button {
 .deal-foot a:hover {
   text-decoration: underline;
 }
+
+/* wlkr OTD sweep button + per-slice tags */
+.btn.otd {
+  background: linear-gradient(135deg, var(--accent-soft), var(--accent));
+  color: #062033;
+}
+
+.mini-chip.tag {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}

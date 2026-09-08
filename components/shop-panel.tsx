@@ -6,6 +6,7 @@ import {
   DEAL_SPORTS,
   LISTING_TYPE_META,
   RARITY_LABELS,
+  WALKER_OTD_SLICES,
   seasonLabel,
   type Deal,
   type DealListingType,
@@ -39,8 +40,19 @@ interface DealsResponse {
   timedOut: boolean;
   elapsedMs: number;
   seasonLabel: string;
+  /** Set by the wlkr-OTD sweep: how many of the 11 slices errored out. */
+  failedSlices?: number;
   error?: string;
 }
+
+const SPORT_TAG: Record<DealSport, string> = {
+  mlb: "MLB",
+  wnba: "WNBA",
+  ncaaf: "CFB",
+  ncaam: "CBB",
+  nfl: "NFL",
+  soccer: "FC",
+};
 
 function endsIn(iso: string | null): string {
   if (!iso) return "?";
@@ -52,7 +64,7 @@ function endsIn(iso: string | null): string {
   return `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}m`;
 }
 
-function DealRow({ d }: { d: Deal }) {
+function DealRow({ d, tag }: { d: Deal; tag?: string }) {
   const col = rarityColor(d.boost || d.rarityLabel);
   const savings =
     d.median != null && d.price < d.median ? Math.round(d.median - d.price) : null;
@@ -61,6 +73,7 @@ function DealRow({ d }: { d: Deal }) {
       <div className="deal-top">
         <span className="deal-player">{d.player}</span>
         <span className="deal-badges">
+          {tag && <span className="mini-chip tag">{tag}</span>}
           <span className="mini-chip type">{LISTING_TYPE_META[d.type].short}</span>
           <span
             className="mini-chip"
@@ -107,6 +120,9 @@ export default function ShopPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DealsResponse | null>(null);
+  const [otdRunning, setOtdRunning] = useState(false);
+  const [otdMsg, setOtdMsg] = useState("");
+  const [otdTags, setOtdTags] = useState<Map<number, string>>(new Map());
 
   const switchSport = (s: DealSport) => {
     setSport(s);
@@ -142,6 +158,83 @@ export default function ShopPanel() {
       setLoading(false);
     }
   }, [sport, season, types, rarities, minDisc, auctions, players]);
+
+  /** wlkr OTD sweep: rare→iconic bulk passes for the fixed tracked-player
+   * list, across all its sport/season slices. Honors the min-discount field
+   * and the auctions toggle; the slice list lives in lib/deals.ts. */
+  const runOtd = useCallback(async () => {
+    setOtdRunning(true);
+    setError(null);
+    setResult(null);
+    const merged: Deal[] = [];
+    const seen = new Set<number>();
+    const tags = new Map<number, string>();
+    let scanned = 0;
+    let lookedUp = 0;
+    let elapsed = 0;
+    let timedOutAny = false;
+    let failed = 0;
+    const total = WALKER_OTD_SLICES.length;
+    try {
+      for (let i = 0; i < total; i++) {
+        const s = WALKER_OTD_SLICES[i];
+        setOtdMsg(`scanning ${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}… (${i + 1}/${total})`);
+        const params = new URLSearchParams({
+          sport: s.sport,
+          season: String(s.season),
+          types: "userpassfull",
+          rarities: "7,6,5,4,3",
+          players: s.players.join(", "),
+          minDisc: String(minDisc),
+          auctions: auctions ? "1" : "0",
+          pages: "3",
+        });
+        try {
+          const res = await fetch(`/api/deals?${params}`);
+          const body = (await res.json()) as DealsResponse;
+          if (!res.ok) {
+            failed++;
+            continue;
+          }
+          const tag = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
+          for (const d of body.deals) {
+            if (seen.has(d.listingId)) continue;
+            seen.add(d.listingId);
+            tags.set(d.listingId, tag);
+            merged.push(d);
+          }
+          scanned += body.scanned;
+          lookedUp += body.lookedUp;
+          elapsed += body.elapsedMs;
+          timedOutAny = timedOutAny || body.timedOut;
+        } catch {
+          failed++;
+        }
+      }
+    } finally {
+      setOtdRunning(false);
+      setOtdMsg("");
+    }
+    merged.sort(
+      (a, b) =>
+        (b.discountPct ?? -1) - (a.discountPct ?? -1) || b.upside - a.upside
+    );
+    if (!merged.length && failed > 0) {
+      setError(`wlkr OTD scan failed on ${failed}/${total} slices — no results`);
+    }
+    const res: DealsResponse = {
+      deals: merged,
+      scanned,
+      lookedUp,
+      timedOut: timedOutAny,
+      elapsedMs: elapsed,
+      seasonLabel: `wlkr tracked set (${total - failed}/${total} scans)`,
+      failedSlices: failed,
+    };
+    // Rendered after the merge so DealRow can show its sport/season tag.
+    setOtdTags(tags);
+    setResult(res);
+  }, [minDisc, auctions]);
 
   useEffect(() => {
     if (!loading) return;
@@ -237,9 +330,13 @@ export default function ShopPanel() {
               spellCheck={false}
             />
           </label>
-          <button className="btn" onClick={run} disabled={loading || !types.length || !rarities.length}>
+          <button className="btn" onClick={run} disabled={loading || otdRunning || !types.length || !rarities.length}>
             {loading ? "scanning…" : "Scan market"}
           </button>
+          <button className="btn otd" onClick={runOtd} disabled={otdRunning || loading} title="Rare→Iconic bulk passes for the fixed wlkr tracked-player list (min discount applies)">
+            {otdRunning ? "scanning…" : "wlkr OTD scan"}
+          </button>
+          {otdRunning && <span className="muted-note">{otdMsg}</span>}
         </div>
       </div>
 
@@ -254,6 +351,9 @@ export default function ShopPanel() {
             {result.timedOut && (
               <span className="muted-note"> — hit the time cap; narrow the filters for a deeper scan</span>
             )}
+            {result.failedSlices ? (
+              <span className="muted-note"> — {result.failedSlices} slice(s) errored</span>
+            ) : null}
           </p>
           {result.deals.length === 0 ? (
             <p className="empty">
@@ -263,7 +363,7 @@ export default function ShopPanel() {
           ) : (
             <ul className="deal-list">
               {result.deals.map((d) => (
-                <DealRow key={d.listingId} d={d} />
+                <DealRow key={d.listingId} d={d} tag={otdTags.get(d.listingId)} />
               ))}
             </ul>
           )}
