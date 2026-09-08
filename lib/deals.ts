@@ -93,6 +93,7 @@ export const WALKER_OTD_SLICES: WalkerOtdSlice[] = [
   { sport: "ncaam", season: 2025, players: ["Braden Smith", "Cooper Flagg", "Mark Sears", "Yaxel Lendeborg", "Johnie Broome"] },
   { sport: "ncaam", season: 2024, players: ["Zach Edey"] },
   { sport: "ncaam", season: 2023, players: ["Zach Edey", "Drew Timme", "Trayce Jackson-Davis"] },
+  { sport: "nba", season: 2024, players: ["Buddy Hield"] }, // 2024 = 2023-24 (ending-year key)
 ];
 
 export interface DealFilters {
