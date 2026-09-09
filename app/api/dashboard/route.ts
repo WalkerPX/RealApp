@@ -121,15 +121,14 @@ export async function GET(req: NextRequest) {
     }
 
     const day = todayET();
-    // Season whose passes we boost. Every sport keys by starting year; NFL's
-    // 2026-27 card set hasn't dropped yet (expected ~mid-Sep 2026), so the
-    // newest boostable passes are the 2025-26 ones — bump to 2026 when the
-    // new set releases.
+    // Season whose passes we boost. Every sport keys by starting year; NFL
+    // boost season is the 2026-27 set (bulk player passes live at season
+    // start — Play cards drop later, but boosts carry over between seasons).
     const BOOST_SEASONS: Partial<Record<Sport, number>> = {
       mlb: 2026,
       wnba: 2026,
       cfb: 2026,
-      nfl: 2025,
+      nfl: 2026,
     };
     const season = BOOST_SEASONS[sport] ?? new Date().getFullYear();
     const isSelf = sessionUserId() !== null && sessionUserId() === user.id;
