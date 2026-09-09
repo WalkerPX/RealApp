@@ -99,6 +99,50 @@ export const WALKER_OTD_SLICES: WalkerOtdSlice[] = [
   { sport: "nba", season: 2024, players: ["Buddy Hield"] }, // 2024 = 2023-24 (ending-year key)
 ];
 
+/** wlkr-Active scan slices: current-season (2026-27) watchlist, scanned by
+ * the "wlkr Active scan" button exactly like the OTD sweep but with live
+ * players instead of bulk-earnings targets. */
+export const WALKER_ACTIVE_SLICES: WalkerOtdSlice[] = [
+  {
+    sport: "ncaaf",
+    season: 2026,
+    players: [
+      "Jackson Arnold",
+      "Trinidad Chambliss",
+      "Jeremiah Smith",
+      "Dante Moore",
+      "Julian Sayin",
+      "Josh Hoover",
+      "Rocco Becht",
+      "Nate Sheppard",
+      "Arch Manning",
+      "KJ Duff",
+      "Demond Williams Jr.",
+      "Charlie Becker",
+      "CJ Carr",
+      "Ryan Browne",
+      "Bryce Underwood",
+      "Dakorien Moore",
+      "Fame Ijeboi",
+      "Turbo Richard",
+      "Asaad Waseem",
+      "JJ Buchanan",
+      "Bo Jackson",
+      "Jeremiah McClellan",
+      "Xavier Townsend",
+      "Nick Marsh",
+      "Rolijah Hardy",
+      "Chris Henry Jr.",
+      "Jerrick Gibson",
+      "Charles Correa",
+      "Andrew Marsh",
+      "Ricky Sampson",
+      "Darian Mensah",
+      "Isiah Jones",
+    ],
+  },
+];
+
 /** One selectable player occurrence in the tracked-player menu:
  * `sport|season|player` — unique per (sport, season) group. */
 export function walkerOtdKey(sport: DealSport, season: number, player: string): string {

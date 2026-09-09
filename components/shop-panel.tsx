@@ -7,6 +7,7 @@ import {
   DEAL_SPORTS,
   LISTING_TYPE_META,
   RARITY_LABELS,
+  WALKER_ACTIVE_SLICES,
   WALKER_OTD_SLICES,
   seasonErrorMessage,
   seasonLabel,
@@ -158,7 +159,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   const [checked, setChecked] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [running, setRunning] = useState(false);
-  const [runMode, setRunMode] = useState<"market" | "otd" | null>(null);
+  const [runMode, setRunMode] = useState<"market" | "otd" | "active" | null>(null);
   const [sweepMsg, setSweepMsg] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DealsResponse | null>(null);
@@ -401,6 +402,23 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
     }
   }, [running, runSlices]);
 
+  /** wlkr Active sweep: identical to the OTD scan but over the current-season
+   * (2026-27) player list instead of the bulk-earnings OTD list. */
+  const runActive = useCallback(async () => {
+    if (running) return;
+    setRunMode("active");
+    try {
+      const slices: RunSlice[] = WALKER_ACTIVE_SLICES.map((s) => ({
+        sport: s.sport,
+        season: s.season,
+        players: s.players,
+      }));
+      await runSlices(slices, ["userpassfull"], [7, 6, 5, 4, 3], "wlkr active set");
+    } finally {
+      setRunMode(null);
+    }
+  }, [running, runSlices]);
+
   const busy = running || runMode !== null;
 
   return (
@@ -539,6 +557,11 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             {showTools && (
               <button className="btn otd" onClick={runOtd} disabled={busy} title="Rare→Iconic bulk passes for the fixed wlkr tracked-player list (min discount applies)">
                 {running && runMode === "otd" ? "scanning…" : "wlkr OTD scan"}
+              </button>
+            )}
+            {showTools && (
+              <button className="btn otd" onClick={runActive} disabled={busy} title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (min discount applies)">
+                {running && runMode === "active" ? "scanning…" : "wlkr Active scan"}
               </button>
             )}
             {running && <span className="muted-note">{sweepMsg}</span>}
