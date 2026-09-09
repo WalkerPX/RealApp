@@ -1208,3 +1208,36 @@ button {
     border-top: 1px solid var(--border);
   }
 }
+
+/* ── Active-scan bulk/play segmented toggle ── */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--border);
+}
+
+.seg-btn.on {
+  color: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.seg-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

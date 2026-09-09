@@ -160,6 +160,8 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [runMode, setRunMode] = useState<"market" | "otd" | "active" | null>(null);
+  // wlkr Active scan card type: bulk rating passes vs individual play cards.
+  const [activeMode, setActiveMode] = useState<"bulk" | "play">("bulk");
   const [sweepMsg, setSweepMsg] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DealsResponse | null>(null);
@@ -403,7 +405,8 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   }, [running, runSlices]);
 
   /** wlkr Active sweep: identical to the OTD scan but over the current-season
-   * (2026-27) player list instead of the bulk-earnings OTD list. */
+   * (2026-27) player list instead of the bulk-earnings OTD list. Toggles
+   * between bulk passes (rare→iconic) and individual play cards (any rarity). */
   const runActive = useCallback(async () => {
     if (running) return;
     setRunMode("active");
@@ -413,11 +416,17 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
         season: s.season,
         players: s.players,
       }));
-      await runSlices(slices, ["userpassfull"], [7, 6, 5, 4, 3], "wlkr active set");
+      const play = activeMode === "play";
+      await runSlices(
+        slices,
+        play ? ["card"] : ["userpassfull"],
+        play ? [7, 6, 5, 4, 3, 2, 1] : [7, 6, 5, 4, 3],
+        play ? "wlkr active play set" : "wlkr active set"
+      );
     } finally {
       setRunMode(null);
     }
-  }, [running, runSlices]);
+  }, [running, runSlices, activeMode]);
 
   const busy = running || runMode !== null;
 
@@ -563,6 +572,28 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
               <button className="btn otd" onClick={runActive} disabled={busy} title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (min discount applies)">
                 {running && runMode === "active" ? "scanning…" : "wlkr Active scan"}
               </button>
+            )}
+            {showTools && (
+              <div className="seg" role="group" aria-label="Active scan card type">
+                <button
+                  type="button"
+                  className={`seg-btn ${activeMode === "bulk" ? "on" : ""}`}
+                  onClick={() => setActiveMode("bulk")}
+                  disabled={busy}
+                  title="Bulk rating passes (rare → iconic)"
+                >
+                  bulk
+                </button>
+                <button
+                  type="button"
+                  className={`seg-btn ${activeMode === "play" ? "on" : ""}`}
+                  onClick={() => setActiveMode("play")}
+                  disabled={busy}
+                  title="Individual play cards (any rarity)"
+                >
+                  play
+                </button>
+              </div>
             )}
             {running && <span className="muted-note">{sweepMsg}</span>}
           </div>
