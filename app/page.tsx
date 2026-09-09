@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { realBoostUrl } from "@/lib/real-api";
+import { playerBoostUrl } from "@/lib/real-api";
 import ShopPanel from "@/components/shop-panel";
 import MonitorPanel, { logMonitor } from "@/components/monitor-panel";
 import {
@@ -126,8 +126,12 @@ function CardView({ c, sport }: { c: DashboardCard; sport: Sport }) {
             {" · "}
             {c.suggestedBooster.remainingCount} in stock
           </div>
-          {sport === "mlb" && (
-            <a href={realBoostUrl(pass.entity.id)} target="_blank" rel="noreferrer">
+          {playerBoostUrl(pass.entity.id, sport) && (
+            <a
+              href={playerBoostUrl(pass.entity.id, sport) ?? "#"}
+              target="_blank"
+              rel="noreferrer"
+            >
               Boost on Real →
             </a>
           )}

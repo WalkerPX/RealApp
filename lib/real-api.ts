@@ -165,8 +165,18 @@ export async function getTodaysSchedule(sport: Sport): Promise<{
  * Public URL — unlike the web.realapp.com API path, opens without a session. */
 const _ROUTING_HASH = new RealHashids("routing", 11);
 
-export function realBoostUrl(playerEntityId: number): string {
-  return `https://www.realapp.com/${_ROUTING_HASH.encode([2, 4, 0, playerEntityId])}`;
+/** Real routing sport ids for player-boost share links (type=2 routes).
+ * Decode/encode-verified against real share links: MLB = 4 (Ohtani →
+ * k3tvTvFwRow), NFL = 2 (Drake Maye 2026-27 → ngQt6tRFxNJ). Others stay
+ * unset until a sample link confirms their id. */
+const ROUTE_SPORT: Partial<Record<Sport, number>> = { mlb: 4, nfl: 2 };
+
+/** Public share link for a player's booster page — null when that sport's
+ * routing id hasn't been verified yet. */
+export function playerBoostUrl(playerEntityId: number, sport: Sport): string | null {
+  const routeSport = ROUTE_SPORT[sport];
+  if (routeSport == null) return null;
+  return `https://www.realapp.com/${_ROUTING_HASH.encode([2, routeSport, 0, playerEntityId])}`;
 }
 
 /** Marketplace listing share link (type=30 route, decode-verified). */
