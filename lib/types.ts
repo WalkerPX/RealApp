@@ -8,7 +8,7 @@ export const SUPPORTED_SPORTS: {
   { id: "mlb", label: "MLB", implemented: true },
   { id: "wnba", label: "WNBA", implemented: true },
   { id: "cfb", label: "CFB", implemented: true },
-  { id: "nfl", label: "NFL", implemented: false },
+  { id: "nfl", label: "NFL", implemented: true },
   { id: "nhl", label: "NHL", implemented: false },
   { id: "fc", label: "FC", implemented: false },
 ];

@@ -17,6 +17,7 @@ import {
 import { planBoosts, type PlayerRole } from "@/lib/boost-plan";
 import { buildWnbaDashboard } from "@/lib/wnba-dash";
 import { buildCfbDashboard } from "@/lib/cfb-dash";
+import { buildNflDashboard } from "@/lib/nfl-dash";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -102,9 +103,9 @@ export async function GET(req: NextRequest) {
   if (!SPORT_IDS.has(sport)) {
     return NextResponse.json({ error: `Unsupported sport "${sportRaw}"` }, { status: 400 });
   }
-  if (sport !== "mlb" && sport !== "wnba" && sport !== "cfb") {
+  if (sport !== "mlb" && sport !== "wnba" && sport !== "cfb" && sport !== "nfl") {
     return NextResponse.json(
-      { error: "Only MLB, WNBA and CFB are implemented so far" },
+      { error: "Only MLB, WNBA, CFB and NFL are implemented so far" },
       { status: 400 }
     );
   }
@@ -120,7 +121,17 @@ export async function GET(req: NextRequest) {
     }
 
     const day = todayET();
-    const season = new Date().getFullYear();
+    // Season whose passes we boost. Every sport keys by starting year; NFL's
+    // 2026-27 card set hasn't dropped yet (expected ~mid-Sep 2026), so the
+    // newest boostable passes are the 2025-26 ones — bump to 2026 when the
+    // new set releases.
+    const BOOST_SEASONS: Partial<Record<Sport, number>> = {
+      mlb: 2026,
+      wnba: 2026,
+      cfb: 2026,
+      nfl: 2025,
+    };
+    const season = BOOST_SEASONS[sport] ?? new Date().getFullYear();
     const isSelf = sessionUserId() !== null && sessionUserId() === user.id;
 
     const [allPasses, sched] = await Promise.all([
@@ -249,12 +260,18 @@ export async function GET(req: NextRequest) {
       respDay = wn.day;
       for (const c of wn.cards) cards.push(c);
       for (const c of wn.candidates) candidates.push(c);
-    } else {
+    } else if (sport === "cfb") {
       // ── CFB layer (ESPN mapping by abbreviation/name; all players) ──
       const cf = await buildCfbDashboard(allPasses, sched, isSelf);
       respDay = cf.day;
       for (const c of cf.cards) cards.push(c);
       for (const c of cf.candidates) candidates.push(c);
+    } else {
+      // ── NFL layer (ESPN mapping by abbreviation/name; all players) ──
+      const nf = await buildNflDashboard(allPasses, sched, isSelf);
+      respDay = nf.day;
+      for (const c of nf.cards) cards.push(c);
+      for (const c of nf.candidates) candidates.push(c);
     }
 
     // ── Booster plan (own account only: inventory is session-scoped) ──
