@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { realBoostUrl } from "@/lib/real-api";
 import ShopPanel from "@/components/shop-panel";
+import MonitorPanel, { logMonitor } from "@/components/monitor-panel";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -165,10 +166,13 @@ export default function Page() {
   // Hidden tools (shop: "wlkr OTD scan" + tracked-player menu) — revealed by
   // clicking the word "Made" in the footer. Defaults off; remembers last state.
   const [devTools, setDevTools] = useState(false);
+  // Right-hand API monitor — revealed by clicking the word "on" in the footer.
+  const [monitorOn, setMonitorOn] = useState(false);
 
   useEffect(() => {
     try {
       setDevTools(window.localStorage.getItem("wlkr.devTools") === "1");
+      setMonitorOn(window.localStorage.getItem("wlkr.monitor") === "1");
     } catch {
       /* ignore */
     }
@@ -183,6 +187,15 @@ export default function Page() {
     }
   }, [devTools]);
 
+  useEffect(() => {
+    try {
+      if (monitorOn) window.localStorage.setItem("wlkr.monitor", "1");
+      else window.localStorage.removeItem("wlkr.monitor");
+    } catch {
+      /* ignore */
+    }
+  }, [monitorOn]);
+
   const run = useCallback(async () => {
     const u = username.trim();
     if (!u) return;
@@ -193,6 +206,7 @@ export default function Page() {
       const res = await fetch(
         `/api/dashboard?username=${encodeURIComponent(u)}&sport=${sport}`
       );
+      const status = res.status;
       const body = await res.json();
       if (!res.ok) {
         const sugg = body?.suggestions?.length
@@ -202,8 +216,32 @@ export default function Page() {
       } else {
         setData(body);
       }
+      // Monitor: dashboard lookups always reach Real (user search + passes),
+      // except the route's own pre-Real 400 guards.
+      const blocked =
+        status === 400 &&
+        typeof body?.error === "string" &&
+        (body.error.startsWith("Missing username") ||
+          body.error.startsWith("Unsupported sport") ||
+          body.error.startsWith("Only MLB"));
+      logMonitor({
+        tag: "dashboard",
+        label: `${sport} · ${u}`,
+        status,
+        sentToReal: !blocked,
+        ok: res.ok,
+        msg: res.ok ? undefined : body?.error ?? `HTTP ${status}`,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network error");
+      logMonitor({
+        tag: "dashboard",
+        label: `${sport} · ${u}`,
+        status: null,
+        sentToReal: false,
+        ok: false,
+        msg: e instanceof Error ? e.message : "Network error",
+      });
     } finally {
       setLoading(false);
     }
@@ -331,6 +369,7 @@ export default function Page() {
       </>
       )}
 
+      {monitorOn && <MonitorPanel />}
       <p className="foot">
         <button
           type="button"
@@ -340,6 +379,15 @@ export default function Page() {
           tabIndex={0}
         >
           Made
+        </button>{" "}
+        <button
+          type="button"
+          className={`foot-made ${monitorOn ? "on" : ""}`}
+          onClick={() => setMonitorOn((v) => !v)}
+          aria-label="toggle API monitor"
+          tabIndex={0}
+        >
+          on
         </button>{" "}
         by <a href="https://www.realapp.com/u/walkr" target="_blank" rel="noreferrer">@walkr</a> on real
       </p>

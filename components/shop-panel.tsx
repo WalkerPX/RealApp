@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { logMonitor } from "@/components/monitor-panel";
 import {
   DEAL_SEASONS,
   DEAL_SPORTS,
   LISTING_TYPE_META,
   RARITY_LABELS,
   WALKER_OTD_SLICES,
+  seasonErrorMessage,
   seasonLabel,
   walkerOtdMenu,
   type Deal,
@@ -55,7 +57,6 @@ const SPORT_TAG: Record<DealSport, string> = {
   nfl: "NFL",
   nhl: "NHL",
   soccer: "FC",
-  golf: "Golf",
 };
 
 /** One scan unit: a sport/season slice filtered to a set of player names. */
@@ -274,13 +275,50 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             minDisc: String(minDisc),
             auctions: auctions ? "1" : "0",
           });
+          const label = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
           try {
             const res = await fetch(`/api/deals?${params}`);
             const body = (await res.json()) as DealsResponse;
             if (!res.ok) {
+              // Real said the season doesn't exist — hard stop so the bad
+              // slice is visible instead of silently continuing.
+              const seasonMsg = seasonErrorMessage(body.error ?? "");
+              if (seasonMsg) {
+                logMonitor({
+                  tag: "deals",
+                  label,
+                  status: res.status,
+                  sentToReal: false,
+                  ok: false,
+                  msg: seasonMsg,
+                });
+                setError(
+                  `Stopped: ${SPORT_TAG[s.sport]} ${seasonLabel(
+                    s.sport,
+                    s.season
+                  )} → ${seasonMsg}`
+                );
+                return;
+              }
+              logMonitor({
+                tag: "deals",
+                label,
+                status: res.status,
+                sentToReal: res.status !== 400,
+                ok: false,
+                msg: body?.error ?? `HTTP ${res.status}`,
+              });
               failed++;
               continue;
             }
+            logMonitor({
+              tag: "deals",
+              label,
+              status: res.status,
+              sentToReal: true,
+              ok: true,
+              msg: `scanned ${body.scanned}`,
+            });
             const tag = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
             for (const d of body.deals) {
               if (seen.has(d.listingId)) continue;
@@ -292,7 +330,15 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             lookedUp += body.lookedUp;
             elapsed += body.elapsedMs;
             timedOutAny = timedOutAny || body.timedOut;
-          } catch {
+          } catch (e) {
+            logMonitor({
+              tag: "deals",
+              label,
+              status: null,
+              sentToReal: false,
+              ok: false,
+              msg: e instanceof Error ? e.message : "Network error",
+            });
             failed++;
           }
         }

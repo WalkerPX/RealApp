@@ -8,7 +8,7 @@
  * only that slice, time-boxed (~20s) with in-memory FMV caching.
  */
 
-export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "golf" | "soccer";
+export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "soccer";
 export type DealListingType = "userpassfull" | "card";
 
 export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
@@ -20,7 +20,6 @@ export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
   { id: "nfl", label: "NFL" },
   { id: "nhl", label: "NHL" },
   { id: "soccer", label: "FC" },
-  { id: "golf", label: "Golf" },
 ];
 
 /** Season per sport (API stores every season as its starting year). */
@@ -39,10 +38,8 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   nfl: [2025, 2024, 2023],
   // NHL keys by STARTING year (2025 = 2025-26); 2026-27 has no cards yet.
   nhl: [2025, 2024, 2023],
-  soccer: [2025],
-  // Golf keys by calendar year (like MLB/WNBA). Live bulk listings verified:
-  // 2026 (heavy), 2025/2024/2023 (a few); 2022 and older have none.
-  golf: [2026, 2025, 2024, 2023],
+  // FC keys by STARTING year (2026 = 2026-27, opened Sep 2026; 2025 = 2025-26).
+  soccer: [2026, 2025],
 };
 
 /** Seasons still in progress — cards have no future OTD claim dates yet, so
@@ -51,7 +48,6 @@ export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
   mlb: 2026,
   wnba: 2026,
   ncaaf: 2026,
-  golf: 2026,
 };
 
 export const RARITY_LABELS: Record<number, string> = {
@@ -65,8 +61,8 @@ export const RARITY_LABELS: Record<number, string> = {
 };
 
 export function seasonLabel(sport: DealSport, season: number): string {
-  // MLB/WNBA/Golf key by calendar year.
-  if (sport === "mlb" || sport === "wnba" || sport === "golf") return String(season);
+  // MLB/WNBA key by calendar year.
+  if (sport === "mlb" || sport === "wnba") return String(season);
   // CBB/NBA key by ending year (2026 = 2025-26); everyone else keys by start.
   if (sport === "ncaam" || sport === "nba") return `${season - 1}-${String(season).slice(-2)}`;
   return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
@@ -100,7 +96,6 @@ export const WALKER_OTD_SLICES: WalkerOtdSlice[] = [
   { sport: "ncaam", season: 2026, players: ["Braden Smith", "Darius Acuff Jr.", "Bennett Stirtz", "Keaton Wagler", "Yaxel Lendeborg", "Cameron Boozer"] },
   { sport: "ncaam", season: 2025, players: ["Braden Smith", "Cooper Flagg", "Mark Sears", "Yaxel Lendeborg", "Johnie Broome"] },
   { sport: "ncaam", season: 2024, players: ["Zach Edey"] },
-  { sport: "ncaam", season: 2023, players: ["Zach Edey", "Drew Timme", "Trayce Jackson-Davis"] },
   { sport: "nba", season: 2024, players: ["Buddy Hield"] }, // 2024 = 2023-24 (ending-year key)
 ];
 
@@ -222,6 +217,18 @@ export { playerMatches };
 export function fmtRax(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return Number(n).toLocaleString("en-US");
+}
+
+/** If a message names a missing/invalid season (Real 400s like "Season not
+ * found"), return it trimmed — else null. Lets the scanner abort hard on a
+ * bad sport/season slice instead of silently skipping it. */
+export function seasonErrorMessage(msg: string): string | null {
+  const m = String(msg ?? "").trim();
+  if (!m) return null;
+  return /season/i.test(m) &&
+    /(not found|invalid|doesn.?t exist|no such|not valid|not supported)/i.test(m)
+    ? m
+    : null;
 }
 
 export interface RawListing {

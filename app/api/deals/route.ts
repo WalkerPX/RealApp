@@ -14,9 +14,6 @@ export const maxDuration = 60;
 
 const VALID_RARITIES = new Set([1, 2, 3, 4, 5, 6, 7]);
 const VALID_TYPES = new Set<DealListingType>(["userpassfull", "card"]);
-const ALL_SEASONS = new Set(
-  Object.values(DEAL_SEASONS).flat()
-);
 
 function err(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
@@ -32,8 +29,10 @@ export async function GET(req: NextRequest) {
   const sport = sportRaw as DealSport;
 
   const season = Number(sp.get("season") ?? "");
-  if (!Number.isInteger(season) || !ALL_SEASONS.has(season)) {
-    return err(`Invalid season "${sp.get("season")}"`);
+  // Validate against THIS sport's seasons — a global union let bad combos
+  // (e.g. ncaam 2023) through to Real, which 400s them.
+  if (!Number.isInteger(season) || !DEAL_SEASONS[sport].includes(season)) {
+    return err(`Invalid season "${sp.get("season")}" for ${sport}`);
   }
 
   const typeRaw = (sp.get("types") ?? "userpassfull").split(",");

@@ -12,6 +12,7 @@ import {
   listingPrice,
   normName,
   playerMatches,
+  seasonErrorMessage,
   type Deal,
   type DealFilters,
   type DealsResult,
@@ -63,7 +64,10 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
           });
           listings = res.listings;
           bucketTotal = res.listingCount || bucketTotal;
-        } catch {
+        } catch (e) {
+          // A bad sport/season slice is a config bug — abort loudly instead
+          // of skipping it as a page hiccup.
+          if (e instanceof Error && seasonErrorMessage(e.message)) throw e;
           break; // page/rarity hiccup — move on
         }
         if (!listings.length) break;

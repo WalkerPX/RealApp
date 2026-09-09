@@ -10,6 +10,7 @@ import {
   listingPlayerLabel,
   listingPrice,
   parseFmvMedian,
+  seasonErrorMessage,
   splitEarnings,
   type RawListing,
 } from "./deals";
@@ -188,7 +189,14 @@ async function mktFetch<T>(path: string): Promise<T> {
   });
   if (!res.ok) {
     if (res.status === 401) throw new Error("Real API auth rejected (401)");
-    throw new Error(`Real API ${path.split("?")[0]} -> ${res.status}`);
+    // Include the body so season errors ("Season not found") can be detected
+    // and surfaced instead of dying as a bare status code.
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Real API ${path.split("?")[0]} -> ${res.status}${
+        body ? `: ${body.slice(0, 200)}` : ""
+      }`
+    );
   }
   const data = (await res.json()) as T;
   mktCache.set(path, { t: Date.now() + MKT_TTL, v: data });
@@ -258,7 +266,9 @@ export async function fetchPlayerEarnings(
       new Date().toLocaleString("en-US", { timeZone: "America/New_York" })
     );
     return splitEarnings(earnings, et);
-  } catch {
+  } catch (e) {
+    // A missing season is a config bug — let it abort the scan loudly.
+    if (e instanceof Error && seasonErrorMessage(e.message)) throw e;
     return null; // no calendar / lookup failure — fall back to FMV-only
   }
 }
