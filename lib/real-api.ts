@@ -169,7 +169,12 @@ const _ROUTING_HASH = new RealHashids("routing", 11);
  * Decode/encode-verified against real share links: MLB = 4 (Ohtani →
  * k3tvTvFwRow), NFL = 2 (Drake Maye 2026-27 → ngQt6tRFxNJ). Others stay
  * unset until a sample link confirms their id. */
-const ROUTE_SPORT: Partial<Record<Sport, number>> = { mlb: 4, nfl: 2 };
+const ROUTE_SPORT: Partial<Record<Sport, number>> = {
+  mlb: 4,
+  nfl: 2,
+  cfb: 11,
+  wnba: 12,
+};
 
 /** Public share link for a player's booster page — null when that sport's
  * routing id hasn't been verified yet. */
