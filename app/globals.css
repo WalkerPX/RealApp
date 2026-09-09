@@ -1031,7 +1031,7 @@ button {
 /* ── API monitor (right-hand panel, toggled from the footer "on" word) ── */
 .foot-made.on {
   color: var(--accent-soft);
-  border-color: var(--accent);
+  border-bottom: 1px dotted var(--accent);
 }
 
 .monitor {

@@ -380,6 +380,7 @@ export default function Page() {
         >
           Made
         </button>{" "}
+        by <a href="https://www.realapp.com/u/walkr" target="_blank" rel="noreferrer">@walkr</a>{" "}
         <button
           type="button"
           className={`foot-made ${monitorOn ? "on" : ""}`}
@@ -389,7 +390,7 @@ export default function Page() {
         >
           on
         </button>{" "}
-        by <a href="https://www.realapp.com/u/walkr" target="_blank" rel="noreferrer">@walkr</a> on real
+        real
       </p>
     </main>
   );
