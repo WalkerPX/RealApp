@@ -10,7 +10,7 @@ export const SUPPORTED_SPORTS: {
   { id: "cfb", label: "CFB", implemented: true },
   { id: "nfl", label: "NFL", implemented: true },
   { id: "nhl", label: "NHL", implemented: false },
-  { id: "fc", label: "FC", implemented: false },
+  { id: "fc", label: "FC", implemented: true },
 ];
 
 export interface RealUser {

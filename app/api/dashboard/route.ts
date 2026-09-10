@@ -18,6 +18,7 @@ import { planBoosts, type PlayerRole } from "@/lib/boost-plan";
 import { buildWnbaDashboard } from "@/lib/wnba-dash";
 import { buildCfbDashboard } from "@/lib/cfb-dash";
 import { buildNflDashboard } from "@/lib/nfl-dash";
+import { buildFcDashboard } from "@/lib/fc-dash";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -103,9 +104,15 @@ export async function GET(req: NextRequest) {
   if (!SPORT_IDS.has(sport)) {
     return NextResponse.json({ error: `Unsupported sport "${sportRaw}"` }, { status: 400 });
   }
-  if (sport !== "mlb" && sport !== "wnba" && sport !== "cfb" && sport !== "nfl") {
+  if (
+    sport !== "mlb" &&
+    sport !== "wnba" &&
+    sport !== "cfb" &&
+    sport !== "nfl" &&
+    sport !== "fc"
+  ) {
     return NextResponse.json(
-      { error: "Only MLB, WNBA, CFB and NFL are implemented so far" },
+      { error: "Only MLB, WNBA, CFB, NFL and FC are implemented so far" },
       { status: 400 }
     );
   }
@@ -129,6 +136,7 @@ export async function GET(req: NextRequest) {
       wnba: 2026,
       cfb: 2026,
       nfl: 2026,
+      fc: 2026,
     };
     const season = BOOST_SEASONS[sport] ?? new Date().getFullYear();
     const isSelf = sessionUserId() !== null && sessionUserId() === user.id;
@@ -265,12 +273,18 @@ export async function GET(req: NextRequest) {
       respDay = cf.day;
       for (const c of cf.cards) cards.push(c);
       for (const c of cf.candidates) candidates.push(c);
-    } else {
+    } else if (sport === "nfl") {
       // ── NFL layer (ESPN mapping by abbreviation/name; all players) ──
       const nf = await buildNflDashboard(allPasses, sched, isSelf);
       respDay = nf.day;
       for (const c of nf.cards) cards.push(c);
       for (const c of nf.candidates) candidates.push(c);
+    } else {
+      // ── FC layer (soccer; Real slate only — club plays today) ──
+      const fc = await buildFcDashboard(allPasses, sched, isSelf);
+      respDay = fc.day;
+      for (const c of fc.cards) cards.push(c);
+      for (const c of fc.candidates) candidates.push(c);
     }
 
     // ── Booster plan (own account only: inventory is session-scoped) ──

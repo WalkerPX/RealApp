@@ -11,6 +11,10 @@ export interface PlanCandidate {
   boosted?: boolean;
   /** Pitcher ranked top-25 in K/9 — only they get strikeout (K) boosters. */
   kTop25?: boolean;
+  /** Sport-specific stat keys this card should draw, in preference order
+   * (e.g. soccer: keeper → SAVE, outfielder → GOAL/AST/DUEL). When set it
+   * overrides the role's default preferences and bans nothing. */
+  statPrefs?: string[];
 }
 
 interface StatPick {
@@ -60,7 +64,8 @@ function takeFromRarity(
   groups: BoosterRarityGroup[],
   rarity: number,
   role: PlayerRole,
-  kTop25: boolean
+  kTop25: boolean,
+  statPrefs?: string[]
 ): { pick: StatPick; group: BoosterRarityGroup } | null {
   const group = groups.find((g) => g.rarity === rarity && g.count > 0);
   if (!group) return null;
@@ -68,14 +73,18 @@ function takeFromRarity(
   // ("70"). Everyone else boosts their own card's best non-K stats, and the
   // K stat is banned even as a last resort for them. Hitters prefer power
   // (HR/3B) then 2B, RBI, R — whatever the card's own stats are worth most.
+  // Sports with their own stat vocabulary pass statPrefs instead.
   const kAllowed = role !== "pitcher" || kTop25;
-  const preferred =
-    role === "pitcher"
+  const custom = statPrefs && statPrefs.length > 0;
+  const preferred = custom
+    ? statPrefs!
+    : role === "pitcher"
       ? kAllowed
         ? ["70", "3", "5"]
         : ["3", "5"]
       : ["2_11", "10", "3", "5", "70"];
-  const pick = takeStat(group, preferred, kAllowed ? undefined : "70");
+  const banned = custom || kAllowed ? undefined : "70";
+  const pick = takeStat(group, preferred, banned);
   if (!pick) return null;
   group.count -= 1;
   return { pick, group };
@@ -119,7 +128,7 @@ export function planBoosts(
 
   for (const c of ranked) {
     for (const rarity of tiers(c.role, c.score)) {
-      const taken = takeFromRarity(groups, rarity, c.role, c.kTop25 === true);
+      const taken = takeFromRarity(groups, rarity, c.role, c.kTop25 === true, c.statPrefs);
       if (!taken) continue;
       const { pick, group } = taken;
       out.set(c.passId, {
