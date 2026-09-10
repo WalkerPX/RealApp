@@ -260,6 +260,125 @@ export async function fetchFmvMedian(
   return parseFmvMedian(d);
 }
 
+
+// ── account rax (historical earnings) ─────────────────────────
+// Real's own "Historical Earnings" screen: /cardhistoricalearnings/calendar
+// returns { day → rax earned that day } for the account, and
+// /cardhistoricalearnings?day= returns that day's per-sport, per-card
+// breakdown. Two calls cover the whole feature — no per-card sweep.
+
+/** Account's rax per day: { "YYYY-MM-DD": total }. */
+export async function getEarningsCalendar(): Promise<Record<string, number>> {
+  const d = await realFetch<{ dailyEarnings?: Record<string, number> }>(
+    "/cardhistoricalearnings/calendar"
+  );
+  return d.dailyEarnings ?? {};
+}
+
+export interface EarningsCardRow {
+  passId: number;
+  entityId: number;
+  entityType: string;
+  label: string;
+  sport: string;
+  infoDetail?: string | null;
+  seasonDisplay?: string | null;
+  rarityLabel?: string | null;
+  level?: number | null;
+  boosted?: boolean;
+  /** Rax credited to this card that day (Real's totalEarnings). */
+  amount: number;
+  avatar?: string | null;
+}
+
+export interface EarningsSportRow {
+  sport: string;
+  label: string;
+  claimsRemaining: number;
+  total: number;
+  cards: EarningsCardRow[];
+}
+
+export interface EarningsDay {
+  dayDisplay: string;
+  isActiveDay: boolean | null;
+  headerDisplay?: string | null;
+  subHeaderDisplay?: string | null;
+  emptyMessage?: string | null;
+  detailMessage?: string | null;
+  sports: EarningsSportRow[];
+  total: number;
+  cards: number;
+}
+
+/** One day of the account's historical earnings, broken down per sport/card.
+ * `day` is Real's eastern day (see earningsDay in lib/earnings.ts). */
+export async function getEarningsDay(day: string): Promise<EarningsDay> {
+  const d = await realFetch<{
+    sportEarnings?: {
+      sport?: string;
+      label?: string;
+      claimsRemaining?: number;
+      passEarnings?: Record<string, unknown>[];
+    }[];
+    dayDisplay?: string;
+    isActiveDay?: boolean;
+    headerDisplay?: string;
+    subHeaderDisplay?: string;
+    emptyMessage?: string;
+    detailMessage?: string;
+  }>(`/cardhistoricalearnings?day=${encodeURIComponent(day)}`);
+
+  const sports: EarningsSportRow[] = [];
+  let total = 0;
+  let cards = 0;
+  for (const s of d.sportEarnings ?? []) {
+    const rows: EarningsCardRow[] = [];
+    for (const p of s.passEarnings ?? []) {
+      const amount = Number(p.totalEarnings ?? 0) || 0;
+      const entity = (p.entity ?? {}) as { avatar?: string | null };
+      const boost = (p.boostInfo ?? {}) as { rarityLabel?: string; level?: number };
+      rows.push({
+        passId: Number(p.id ?? 0),
+        entityId: Number(p.entityId ?? 0),
+        entityType: String(p.entityType ?? ""),
+        label: String(p.label ?? ""),
+        sport: String(p.sport ?? s.sport ?? ""),
+        infoDetail: (p.infoDetail as string) ?? null,
+        seasonDisplay: (p.seasonDisplay as string) ?? null,
+        rarityLabel: boost.rarityLabel ?? null,
+        level: boost.level ?? null,
+        boosted: p.isCardBoosted === true,
+        amount,
+        avatar: entity.avatar ?? null,
+      });
+      total += amount;
+      cards += 1;
+    }
+    rows.sort((a, b) => b.amount - a.amount);
+    sports.push({
+      sport: String(s.sport ?? ""),
+      label: String(s.label ?? s.sport ?? ""),
+      claimsRemaining: Number(s.claimsRemaining ?? 0) || 0,
+      total: rows.reduce((a, r) => a + r.amount, 0),
+      cards: rows,
+    });
+  }
+  sports.sort((a, b) => b.total - a.total);
+
+  return {
+    dayDisplay: d.dayDisplay ?? day,
+    isActiveDay: d.isActiveDay ?? null,
+    headerDisplay: d.headerDisplay ?? null,
+    subHeaderDisplay: d.subHeaderDisplay ?? null,
+    emptyMessage: d.emptyMessage ?? null,
+    detailMessage: d.detailMessage ?? null,
+    sports,
+    total,
+    cards,
+  };
+}
+
 /** Earnings calendar for a player pass at its boost level. */
 export async function fetchPlayerEarnings(
   sport: string,

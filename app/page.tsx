@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { playerBoostUrl } from "@/lib/real-api";
 import ShopPanel from "@/components/shop-panel";
 import MonitorPanel, { logMonitor } from "@/components/monitor-panel";
+import EarningsPanel from "@/components/earnings-panel";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -161,7 +162,7 @@ function roleTitle(sport: Sport, role: PlayerRole): string {
 }
 
 export default function Page() {
-  const [view, setView] = useState<"boost" | "shop">("boost");
+  const [view, setView] = useState<"boost" | "shop" | "rax">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
@@ -271,6 +272,15 @@ export default function Page() {
           >
             Shop
           </button>
+          <button
+            key="rax"
+            role="tab"
+            aria-selected={view === "rax"}
+            className={`sport-pill shop ${view === "rax" ? "active" : ""}`}
+            onClick={() => setView("rax")}
+          >
+            Rax
+          </button>
         </div>
 
         {view === "boost" && (
@@ -297,6 +307,8 @@ export default function Page() {
 
       {view === "shop" ? (
         <ShopPanel showTools={devTools} />
+      ) : view === "rax" ? (
+        <EarningsPanel />
       ) : (
         <>
           {error && <div className="error-banner">{error}</div>}
