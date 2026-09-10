@@ -43,20 +43,22 @@ type TeamsResp = {
   sports: { leagues: { teams: { team: { id: string; abbreviation?: string; displayName: string } }[] }[] }[];
 };
 /**
- * ESPN CFB team ids by abbreviation ("FSU") — Real's CFB schedule names teams
- * by abbreviation only. Also keeps full display names as a fallback map for
- * teams Real ever names in full.
+ * ESPN CFB team ids by abbreviation ("FSU") — Real's CFB schedule carries the
+ * abbreviation on `team.key` (displayName is often just the short name, e.g.
+ * "Miami"). Abbreviations are not unique across FBS/FCS (OSU, MIA…), so each
+ * maps to a LIST of ids; cfb-dash picks the one that is actually on today's
+ * slate.
  */
-export async function espnTeamsByAbbrev(): Promise<Map<string, number>> {
+export async function espnTeamsByAbbrev(): Promise<Map<string, number[]>> {
   const d = await espnFetch<TeamsResp>(`${ESPN}/teams?limit=2000`, TTL_DAY);
-  const byAbbrev = new Map<string, number>();
+  const byAbbrev = new Map<string, number[]>();
   for (const t of d.sports[0].leagues[0].teams) {
     const ab = (t.team.abbreviation ?? "").trim().toUpperCase();
-    if (ab) {
-      // Ambiguous abbreviations (e.g. OSU = Ohio State + Oregon State) resolve
-      // later against the actual slate — see resolveRealTeams in cfb-dash.
-      byAbbrev.set(ab, byAbbrev.has(ab) ? -1 : Number(t.team.id));
-    }
+    const id = Number(t.team.id);
+    if (!ab || !id) continue;
+    const ids = byAbbrev.get(ab) ?? [];
+    if (!ids.includes(id)) ids.push(id);
+    byAbbrev.set(ab, ids);
   }
   return byAbbrev;
 }

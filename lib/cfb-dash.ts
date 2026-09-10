@@ -100,35 +100,38 @@ export async function buildCfbDashboard(
   }
   if (espnGames.length === 0) return { day: realSched.day, cards, candidates };
 
-  // Real team -> ESPN team: abbreviation first (slate-disambiguated), then
-  // full display-name match (e.g. "Miami Hurricanes").
+  // Real team -> ESPN team: abbreviation (team.key — Real's displayName is
+  // often just the short name, e.g. "Miami"), slate-disambiguated when the
+  // abbreviation is shared; then full display-name / short-name matching.
   const realToEspn = new Map<number, number>();
-  const abbrevOf = new Map<number, string>(); // real teamId -> abbreviation
   for (const g of games) {
     for (const [rid, team] of [
       [g.homeTeamId, g.homeTeam],
       [g.awayTeamId, g.awayTeam],
     ] as [number, Team][]) {
       if (!wantedReal.includes(rid) || realToEspn.has(rid)) continue;
-      const abbrev = (team.displayName || team.name || "").trim().toUpperCase();
-      abbrevOf.set(rid, abbrev);
-      const cand = abbrev ? byAbbrev.get(abbrev) : undefined;
+      const abbrev = (team.key || team.displayName || team.name || "").trim().toUpperCase();
+      const realNorm = normName(team.displayName || team.name || "");
+      const candIds = abbrev ? (byAbbrev.get(abbrev) ?? []) : [];
       let eid: number | null = null;
-      if (cand && cand > 0) {
-        eid = cand; // unique abbreviation
-      } else if (cand === -1) {
-        // Ambiguous abbreviation (OSU…) — pick the one on this slate.
-        for (const [ab2, id] of byAbbrev) {
-          if (ab2 === abbrev && slateEspnTeams.has(id)) {
-            eid = id;
-            break;
-          }
-        }
+      if (candIds.length === 1) {
+        eid = candIds[0]; // unique abbreviation
+      } else if (candIds.length > 1) {
+        // Shared abbreviation (e.g. OSU) — pick the one on this slate.
+        eid = candIds.find((id) => slateEspnTeams.has(id)) ?? null;
       }
-      if (eid == null && abbrev) {
-        // Real spelled the team out — match display names.
-        const dn = byName.get(normName(team.displayName || ""));
-        if (dn != null) eid = dn;
+      if (eid == null && realNorm) {
+        // Real spelled the team out — full display name first ("Miami
+        // Hurricanes"), then short-name prefix ("miami" → "miami hurricanes"),
+        // always restricted to teams actually playing today.
+        const dn = byName.get(realNorm);
+        if (dn != null && espnStatus.has(dn)) eid = dn;
+        else {
+          const matches = [...byName]
+            .filter(([k, id]) => k.startsWith(`${realNorm} `) && slateEspnTeams.has(id))
+            .map(([, id]) => id);
+          if (matches.length === 1) eid = matches[0];
+        }
       }
       if (eid != null && espnStatus.has(eid)) realToEspn.set(rid, eid);
     }
