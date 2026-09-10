@@ -168,37 +168,11 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
   // Hidden tools (shop: "wlkr OTD scan" + tracked-player menu) — revealed by
-  // clicking the word "Made" in the footer. Defaults off; remembers last state.
+  // clicking the word "Made" in the footer. Off on every page load.
   const [devTools, setDevTools] = useState(false);
   // Right-hand API monitor — revealed by clicking the word "on" in the footer.
+  // Off on every page load (no persistence: reload hides it again).
   const [monitorOn, setMonitorOn] = useState(false);
-
-  useEffect(() => {
-    try {
-      setDevTools(window.localStorage.getItem("wlkr.devTools") === "1");
-      setMonitorOn(window.localStorage.getItem("wlkr.monitor") === "1");
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      if (devTools) window.localStorage.setItem("wlkr.devTools", "1");
-      else window.localStorage.removeItem("wlkr.devTools");
-    } catch {
-      /* ignore */
-    }
-  }, [devTools]);
-
-  useEffect(() => {
-    try {
-      if (monitorOn) window.localStorage.setItem("wlkr.monitor", "1");
-      else window.localStorage.removeItem("wlkr.monitor");
-    } catch {
-      /* ignore */
-    }
-  }, [monitorOn]);
 
   const run = useCallback(async () => {
     const u = username.trim();

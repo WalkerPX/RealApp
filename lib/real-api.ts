@@ -174,6 +174,7 @@ const ROUTE_SPORT: Partial<Record<Sport, number>> = {
   nfl: 2,
   cfb: 11,
   wnba: 12,
+  fc: 14,
 };
 
 /** Public share link for a player's booster page — null when that sport's
