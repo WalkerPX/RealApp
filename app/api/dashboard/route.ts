@@ -159,6 +159,9 @@ export async function GET(req: NextRequest) {
     const cards: DashboardCard[] = [];
     const candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean; kTop25?: boolean }[] = [];
     let respDay = day;
+    // Source trace for sports whose join can come up empty (CFB) — surfaced by
+    // the UI when the tab shows no cards, so an empty tab explains itself.
+    let debug: string[] | undefined;
 
     if (sport === "mlb") {
       const mlbGames = await getTodaysMlbGames(day);
@@ -271,6 +274,7 @@ export async function GET(req: NextRequest) {
       // ── CFB layer (ESPN mapping by abbreviation/name; all players) ──
       const cf = await buildCfbDashboard(allPasses, sched, isSelf);
       respDay = cf.day;
+      debug = cf.diag;
       for (const c of cf.cards) cards.push(c);
       for (const c of cf.candidates) candidates.push(c);
     } else if (sport === "nfl") {
@@ -314,6 +318,7 @@ export async function GET(req: NextRequest) {
       totalOwned: allPasses.length,
       projectedCount: cards.filter((c) => c.role !== "team").length,
       suggestionsForSelf: isSelf,
+      debug,
     });
   } catch (err) {
     console.error(err);

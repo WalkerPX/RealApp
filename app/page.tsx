@@ -329,10 +329,20 @@ export default function Page() {
           </p>
 
           {data.cards.length === 0 ? (
-            <p className="empty">
-              No owned {data.sport.toUpperCase()} cards playing today — check back on a
-              game day.
-            </p>
+            <div>
+              <p className="empty">
+                No owned {data.sport.toUpperCase()} cards playing today — check back on a
+                game day.
+              </p>
+              {data.debug && data.debug.length > 0 && (
+                <div className="debug-trace">
+                  <div className="debug-trace-title">Source trace</div>
+                  {data.debug.map((line, i) => (
+                    <div key={i}>{line}</div>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="groups">
               {(["pitcher", "hitter", "team"] as PlayerRole[]).map((role) => {

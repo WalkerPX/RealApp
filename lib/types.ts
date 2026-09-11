@@ -165,4 +165,6 @@ export interface DashboardResponse {
   totalOwned: number;
   projectedCount: number;
   suggestionsForSelf: boolean;
+  /** Source trace (CFB only) — rendered when the tab has no cards. */
+  debug?: string[];
 }

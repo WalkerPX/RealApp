@@ -29,6 +29,10 @@ export interface CfbOutput {
   day: string;
   cards: DashboardCard[];
   candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean }[];
+  /** Compact trace of the Real-slate → ESPN → roster join. Rendered by the UI
+   * when the CFB tab comes up empty, so an empty tab always says why (empty
+   * slate? unmapped team? ESPN feed down? nobody matched?). */
+  diag?: string[];
 }
 
 function findEspnAthlete(
@@ -67,6 +71,14 @@ export async function buildCfbDashboard(
   const cards: DashboardCard[] = [];
   const candidates: CfbOutput["candidates"] = [];
   const games = realSched.games;
+  const diag: string[] = [];
+  const keyOf = (rid: number): string => {
+    for (const g of games) {
+      if (g.homeTeamId === rid) return g.homeTeam.key || g.homeTeam.displayName || String(rid);
+      if (g.awayTeamId === rid) return g.awayTeam.key || g.awayTeam.displayName || String(rid);
+    }
+    return String(rid);
+  };
 
   // Real team ids (by abbreviation) that play this slate.
   const realTeamIds = new Set<number>();
@@ -78,7 +90,12 @@ export async function buildCfbDashboard(
     passes.map((p) => (p.entityType === "team" ? p.entity.id : p.entity.teamId ?? 0))
   );
   const wantedReal = [...realTeamIds].filter((t) => ownedTeams.has(t));
-  if (!wantedReal.length) return { day: realSched.day, cards, candidates };
+  diag.push(
+    `real slate ${realSched.day}: ${games.length} games` +
+      (games.length ? ` (${games.map((g) => `${g.awayTeam.key}@${g.homeTeam.key}`).join(" ")})` : ""),
+    `owned on slate: ${wantedReal.length ? wantedReal.map(keyOf).join(" ") : "none"} of ${passes.length} passes`
+  );
+  if (!wantedReal.length) return { day: realSched.day, cards, candidates, diag };
 
   const espnDate = realSched.day.replace(/-/g, "");
   const [byAbbrev, byName, espnGames] = await Promise.all([
@@ -98,7 +115,8 @@ export async function buildCfbDashboard(
     slateEspnTeams.add(eg.homeTeamId);
     slateEspnTeams.add(eg.awayTeamId);
   }
-  if (espnGames.length === 0) return { day: realSched.day, cards, candidates };
+  diag.push(`espn ${espnDate}: ${espnGames.length} events, ${byAbbrev.size} abbrevs, ${byName.size} names`);
+  if (espnGames.length === 0) return { day: realSched.day, cards, candidates, diag };
 
   // Real team -> ESPN team: abbreviation (team.key — Real's displayName is
   // often just the short name, e.g. "Miami"), slate-disambiguated when the
@@ -136,6 +154,12 @@ export async function buildCfbDashboard(
       if (eid != null && espnStatus.has(eid)) realToEspn.set(rid, eid);
     }
   }
+  diag.push(
+    `mapped: ${realToEspn.size ? [...realToEspn].map(([r, e]) => `${keyOf(r)}->${e}`).join(" ") : "none"}` +
+      (realToEspn.size < wantedReal.length
+        ? ` · unmapped: ${wantedReal.filter((r) => !realToEspn.has(r)).map(keyOf).join(" ")}`
+        : "")
+  );
 
   type Pool = {
     players: Map<number, { id: number; name: string; jersey: string; pos: string }>;
@@ -166,10 +190,22 @@ export async function buildCfbDashboard(
     const roster = await espnRoster(eid);
     pools.set(rid, { players: roster, played: new Set(), started: false });
   }
+  diag.push(
+    `pools: ${
+      [...pools].map(([r, p]) => `${keyOf(r)}:${p.players.size}${p.started ? "box" : "roster"}`).join(" ") ||
+      "none"
+    }`
+  );
 
   // Per-game divisor: completed team games this season (fetched once per team).
   const gamesPlayedCache = new Map<number, number>();
   const totalsCache = new Map<number, ReturnType<typeof espnAthleteTotals> extends Promise<infer T> ? T : never>();
+
+  let matched = 0;
+  let noPool = 0;
+  let injured = 0;
+  let noAthlete = 0;
+  let benched = 0;
 
   for (const pass of passes) {
     const rid = pass.entityType === "team" ? pass.entity.id : (pass.entity.teamId ?? 0);
@@ -180,18 +216,29 @@ export async function buildCfbDashboard(
         : realGame.homeTeam
       : null;
     const pool = pools.get(rid);
-    if (!pool) continue;
+    if (!pool) {
+      // Only on-slate teams get a pool; keep the tally meaningful.
+      if (wantedReal.includes(rid)) noPool++;
+      continue;
+    }
 
     if (pass.entityType === "team") {
       cards.push({ pass, game: realGame ?? null, opponent, role: "team", score: null, lineupTbd: false, suggestedBooster: null });
+      matched++;
       continue;
     }
 
     const injury = pass.entity.injuryStatus?.toLowerCase();
-    if (injury && injury !== "active" && injury !== "available") continue;
+    if (injury && injury !== "active" && injury !== "available") {
+      injured++;
+      continue;
+    }
 
     const ath = findEspnAthlete(pool.players, pass);
-    if (!ath) continue;
+    if (!ath) {
+      noAthlete++;
+      continue;
+    }
 
     let projected: boolean;
     let lineupTbd: boolean;
@@ -202,7 +249,11 @@ export async function buildCfbDashboard(
       projected = true; // active roster on a scheduled slate
       lineupTbd = true;
     }
-    if (!projected) continue;
+    if (!projected) {
+      benched++;
+      continue;
+    }
+    matched++;
 
     if (!totalsCache.has(ath.id)) totalsCache.set(ath.id, await espnAthleteTotals(ath.id));
     let gp = gamesPlayedCache.get(rid);
@@ -230,5 +281,14 @@ export async function buildCfbDashboard(
     }
   }
 
-  return { day: realSched.day, cards, candidates };
+  const onSlate = passes.filter((p) =>
+    wantedReal.includes(p.entityType === "team" ? p.entity.id : (p.entity.teamId ?? 0))
+  ).length;
+  diag.push(
+    `slate passes ${onSlate} → matched ${matched}` +
+      (onSlate - matched > 0
+        ? ` (skipped: no pool ${noPool}, injured ${injured}, not on ESPN roster ${noAthlete}, not in boxscore ${benched})`
+        : "")
+  );
+  return { day: realSched.day, cards, candidates, diag };
 }
