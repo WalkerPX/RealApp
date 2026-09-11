@@ -148,13 +148,20 @@ export async function getBoosterInventory(
   return data.boosterCardInfo ?? { rarityGroups: [] };
 }
 
+/** Real's cohort param filters the day slate. 0 is each sport's *default*
+ * cohort — for CFB that is "T25" (ranked teams only), which silently drops
+ * unranked games (BC–RUTG, NCSU–RICH). 777777777 is Real's own "All" cohort
+ * (see cohortOptions); it's a no-op for MLB/WNBA/NFL/soccer, which have no
+ * cohorts at all. Always ask for All. */
+const ALL_COHORT = 777777777;
+
 export async function getTodaysSchedule(sport: Sport): Promise<{
   day: string;
   games: Game[];
 }> {
   const data = await realFetch<{
     latestDayContent: { day?: string; games?: Game[] };
-  }>(`/home/${realSportKey(sport)}/next?cohort=0`);
+  }>(`/home/${realSportKey(sport)}/next?cohort=${ALL_COHORT}`);
   const l = data.latestDayContent ?? {};
   return { day: l.day ?? "", games: l.games ?? [] };
 }
