@@ -250,6 +250,9 @@ export interface DealsResult {
   lookedUp: number;
   timedOut: boolean;
   elapsedMs: number;
+  /** Player names that Real's search could not resolve to an entity — the
+   * scan silently returns nothing for these, so they are reported instead. */
+  unresolved?: string[];
 }
 
 /** Lowercase alphanumerics only — "A'ja Wilson" == "Aja Wilson". */

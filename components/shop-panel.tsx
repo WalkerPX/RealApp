@@ -47,6 +47,9 @@ interface DealsResponse {
   seasonLabel: string;
   /** Set by the wlkr-OTD sweep: how many slices errored out. */
   failedSlices?: number;
+  /** Player names Real's search couldn't resolve (the run returns nothing for
+   * them, so they're called out instead of looking like "no deals"). */
+  unresolved?: string[];
   error?: string;
 }
 
@@ -282,6 +285,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
       let elapsed = 0;
       let timedOutAny = false;
       let failed = 0;
+      const unresolvedNames = new Set<string>();
       const total = slices.length;
       try {
         for (let i = 0; i < total; i++) {
@@ -353,6 +357,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             lookedUp += body.lookedUp;
             elapsed += body.elapsedMs;
             timedOutAny = timedOutAny || body.timedOut;
+            for (const n of body.unresolved ?? []) unresolvedNames.add(n);
           } catch (e) {
             logMonitor({
               tag: "deals",
@@ -373,8 +378,13 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
         (a, b) =>
           (b.discountPct ?? -1) - (a.discountPct ?? -1) || b.upside - a.upside
       );
-      if (!merged.length && failed > 0) {
+      if (!merged.length && failed > 0 && !unresolvedNames.size) {
         setError(`${who} failed on ${failed}/${total} slices — no results`);
+      }
+      if (!merged.length && unresolvedNames.size) {
+        setError(
+          `No such player on Real: ${[...unresolvedNames].join(", ")} — check the spelling or the sport/season.`
+        );
       }
       setTags(sliceTags);
       const label =
@@ -389,6 +399,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
         elapsedMs: elapsed,
         seasonLabel: label,
         failedSlices: failed,
+        unresolved: [...unresolvedNames],
       });
     },
     [minDisc, auctions, screen, factor]
@@ -578,6 +589,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
                 onChange={(e) => setPlayers(e.target.value)}
                 placeholder="Optional — e.g. Gunnar Henderson, Blaze Alexander (comma separated)"
                 spellCheck={false}
+                title="Each name is resolved on Real and then that player's own listings are pulled — exact, unlike a whole-market sweep"
               />
             </label>
 
@@ -674,6 +686,12 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             )}
             {result.failedSlices ? (
               <span className="muted-note"> — {result.failedSlices} slice(s) errored</span>
+            ) : null}
+            {result.unresolved?.length ? (
+              <span className="muted-note">
+                {" "}
+                — no player on Real named {result.unresolved.join(", ")}
+              </span>
             ) : null}
           </p>
           {result.deals.length === 0 ? (

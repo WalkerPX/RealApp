@@ -293,6 +293,68 @@ export async function fetchFmvMedian(
   return parseFmvMedian(d);
 }
 
+// ── player-scoped marketplace search ─────────────────────────
+// Two facts drive this pair of calls (both verified against the live API):
+//  1. `/cardmarketplacelistings` ignores `offset` and `beforeEndsAt` — every
+//     page of a bucket query returns the same first 10 listings, so a
+//     sport/season/rarity bucket can never be paged deeper than page one.
+//  2. That same endpoint honours `filterEntityType=player` + `filterEntityId`,
+//     returning that player's listings (with an exact `listingCount`).
+// So the only reliable way to search a named player is: resolve the name to a
+// player entity id, then ask for that player's listings directly.
+
+interface SearchEntity {
+  type?: string;
+  id?: number;
+  entity?: { id?: number; firstName?: string; lastName?: string; sport?: string };
+}
+
+const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** Resolve "Ryan Browne" → the player entity id Real's own search returns.
+ * Exact full-name match wins; a surname-only match is the fallback (play-card
+ * labels are abbreviated, so callers may pass a bare surname). */
+export async function searchPlayerId(
+  sport: string,
+  name: string
+): Promise<number | null> {
+  const d = await mktFetch<{ entities?: SearchEntity[] }>(
+    `/search?query=${encodeURIComponent(name)}&sport=${encodeURIComponent(sport)}`
+  );
+  const players = (d.entities ?? []).filter((e) => e.type === "player");
+  const full = (e: SearchEntity) =>
+    `${e.entity?.firstName ?? ""} ${e.entity?.lastName ?? ""}`.trim();
+  const want = nameKey(name);
+  const exact = players.find((e) => nameKey(full(e)) === want);
+  if (exact) return exact.entity?.id ?? exact.id ?? null;
+  const surname = players.find((e) => nameKey(e.entity?.lastName ?? "") === want);
+  if (surname) return surname.entity?.id ?? surname.id ?? null;
+  const first = players[0];
+  return first ? first.entity?.id ?? first.id ?? null : null;
+}
+
+/** Every listing a player currently has in one rarity/type bucket (exact). */
+export async function fetchPlayerListings(params: {
+  sport: string;
+  season: number;
+  rarity: number;
+  listingType: string;
+  playerId: number;
+}): Promise<MarketplacePage> {
+  const q = new URLSearchParams({
+    sport: params.sport,
+    season: String(params.season),
+    rarity: String(params.rarity),
+    listingType: params.listingType,
+    filterEntityType: "player",
+    filterEntityId: String(params.playerId),
+  });
+  const d = await mktFetch<{ listings?: RawListing[]; listingCount?: number }>(
+    `/cardmarketplacelistings?${q}`
+  );
+  return { listings: d.listings ?? [], listingCount: d.listingCount ?? 0 };
+}
+
 
 // ── account rax (historical earnings) ─────────────────────────
 // Real's own "Historical Earnings" screen: /cardhistoricalearnings/calendar
