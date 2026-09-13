@@ -208,7 +208,15 @@ export interface DealFilters {
   players?: string[];
   minDiscountPct: number;
   auctionOnly: boolean;
+  /** What makes a listing a "deal":
+   *   discount (default) — price is minDiscountPct below the FMV median;
+   *   rating — price is under `ratingFactor` × the card's own rating. */
+  mode?: DealMode;
+  /** Multiplier for `mode: "rating"`. */
+  ratingFactor?: number;
 }
+
+export type DealMode = "discount" | "rating";
 
 export interface Deal {
   listingId: number;
@@ -227,6 +235,12 @@ export interface Deal {
   url: string;
   isDiscountDeal: boolean;
   isRoiDeal: boolean;
+  /** The card's own rating — a play card's Real Rating (e.g. 5.9), a bulk
+   * pass's accumulated rating. Comes from the listing's `value`. */
+  rating: number | null;
+  isRatingDeal: boolean;
+  /** rating × ratingFactor — the price ceiling a rating deal sits under. */
+  ratingCap: number | null;
   upside: number;
 }
 
@@ -286,6 +300,9 @@ export interface RawListing {
   buyNowPrice?: number | null;
   currentBidAmount?: number | null;
   minBidPrice?: number | null;
+  /** The card's rating, as the marketplace shows it (a play card's Real
+   * Rating, e.g. 5.9; a bulk pass's accumulated rating). */
+  value?: number | string | null;
   card?: {
     label?: string | null;
     entityLabel?: string | null;
@@ -308,6 +325,14 @@ export function listingPrice(l: RawListing): number | null {
   if (l.currentBidAmount != null) return Number(l.currentBidAmount);
   if (l.minBidPrice != null) return Number(l.minBidPrice);
   return null;
+}
+
+/** The card's rating, as the marketplace lists it. A play card carries its Real
+ * Rating here (e.g. 5.9); a bulk pass carries its accumulated rating (its
+ * `card.boostValue`, e.g. 108.6 — the same number that sets its level). */
+export function listingRating(l: RawListing): number | null {
+  const n = Number(l.value ?? (l.card as { boostValue?: number | string | null } | null)?.boostValue);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export function boostLabel(l: RawListing): string {

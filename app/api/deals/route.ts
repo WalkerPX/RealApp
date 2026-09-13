@@ -6,6 +6,7 @@ import {
   seasonLabel,
   type DealFilters,
   type DealListingType,
+  type DealMode,
   type DealSport,
 } from "@/lib/deals";
 
@@ -58,6 +59,14 @@ export async function GET(req: NextRequest) {
   const minDiscountPct = Math.min(90, Math.max(0, Number(sp.get("minDisc") ?? 20)));
   const auctionOnly = sp.get("auctions") !== "0";
 
+  // Screen mode: "discount" (FMV-based, default) or "rating" (price under
+  // ratingFactor × the card's own rating — the factor replaces the discount).
+  const mode: DealMode = sp.get("mode") === "rating" ? "rating" : "discount";
+  const factorRaw = Number(sp.get("factor") ?? 12);
+  const ratingFactor = Number.isFinite(factorRaw)
+    ? Math.min(1000, Math.max(1, factorRaw))
+    : 12;
+
   const filters: DealFilters = {
     sport,
     season,
@@ -66,6 +75,8 @@ export async function GET(req: NextRequest) {
     players,
     minDiscountPct: Number.isFinite(minDiscountPct) ? minDiscountPct : 20,
     auctionOnly,
+    mode,
+    ratingFactor,
   };
 
   try {

@@ -14,6 +14,7 @@ import {
   walkerOtdMenu,
   type Deal,
   type DealListingType,
+  type DealMode,
   type DealSport,
 } from "@/lib/deals";
 
@@ -128,6 +129,12 @@ function DealRow({ d, tag }: { d: Deal; tag?: string }) {
             pays itself: +{d.remaining.toLocaleString()} rax to collect
           </span>
         )}
+        {d.isRatingDeal && d.rating != null && (
+          <span className="deal-rating">
+            rating {d.rating.toLocaleString()} · under{" "}
+            {Math.round(d.ratingCap ?? 0).toLocaleString()} rax
+          </span>
+        )}
         <span className="deal-price">
           {d.price.toLocaleString()} rax{d.median != null && ` · FMV ${d.median.toLocaleString()}`}
         </span>
@@ -162,6 +169,11 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   const [runMode, setRunMode] = useState<"market" | "otd" | "active" | null>(null);
   // wlkr Active scan card type: bulk rating passes vs individual play cards.
   const [activeMode, setActiveMode] = useState<"bulk" | "play">("bulk");
+  // wlkr Active scan screen: "discount" keeps the FMV min-discount rule;
+  // "rating" swaps it for "price under factor × the card's rating" (a 5.9
+  // rating at 12× = anything under 70.8 rax).
+  const [screen, setScreen] = useState<DealMode>("discount");
+  const [factor, setFactor] = useState(12);
   const [sweepMsg, setSweepMsg] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DealsResponse | null>(null);
@@ -248,9 +260,17 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   /** Sequential scan over one or more slices; merges and sorts the deals.
    * who = summary label when spanning multiple slices ("wlkr tracked set" /
    * "checked players"). Honors min-discount + auctions; types/rarities are
-   * passed per call (the OTD sweep forces bulk + rare→iconic). */
+   * passed per call (the OTD sweep forces bulk + rare→iconic). `over` swaps
+   * the screen for this run only — the Active scan uses it to search by
+   * rating-factor instead of discount. */
   const runSlices = useCallback(
-    async (slices: RunSlice[], listTypes: DealListingType[], rar: number[], who: string) => {
+    async (
+      slices: RunSlice[],
+      listTypes: DealListingType[],
+      rar: number[],
+      who: string,
+      over?: { mode: DealMode; factor: number }
+    ) => {
       if (!slices.length) return;
       setRunning(true);
       setError(null);
@@ -278,6 +298,10 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             minDisc: String(minDisc),
             auctions: auctions ? "1" : "0",
           });
+          if (over) {
+            params.set("mode", over.mode);
+            if (over.mode === "rating") params.set("factor", String(over.factor));
+          }
           const label = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
           try {
             const res = await fetch(`/api/deals?${params}`);
@@ -421,12 +445,13 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
         slices,
         play ? ["card"] : ["userpassfull"],
         play ? [7, 6, 5, 4, 3, 2, 1] : [7, 6, 5, 4, 3],
-        play ? "wlkr active play set" : "wlkr active set"
+        play ? "wlkr active play set" : "wlkr active set",
+        { mode: screen, factor }
       );
     } finally {
       setRunMode(null);
     }
-  }, [running, runSlices, activeMode]);
+  }, [running, runSlices, activeMode, screen, factor]);
 
   const busy = running || runMode !== null;
 
@@ -593,6 +618,43 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
                 >
                   play
                 </button>
+              </div>
+            )}
+            {showTools && (
+              <div className="seg" role="group" aria-label="Active scan search factor">
+                <button
+                  type="button"
+                  className={`seg-btn ${screen === "discount" ? "on" : ""}`}
+                  onClick={() => setScreen("discount")}
+                  disabled={busy}
+                  title="Deal = price is at least N% under the FMV median"
+                >
+                  discount
+                </button>
+                <button
+                  type="button"
+                  className={`seg-btn ${screen === "rating" ? "on" : ""}`}
+                  onClick={() => setScreen("rating")}
+                  disabled={busy}
+                  title="Deal = price is under factor × the card's own rating"
+                >
+                  rating ×
+                </button>
+                {screen === "rating" && (
+                  <span className="numwrap">
+                    <input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      step={1}
+                      value={factor}
+                      onChange={(e) => setFactor(Math.max(1, Number(e.target.value) || 12))}
+                      disabled={busy}
+                      title="Price ceiling = this × the card's rating"
+                    />
+                    <span className="pct">×</span>
+                  </span>
+                )}
               </div>
             )}
             {running && <span className="muted-note">{sweepMsg}</span>}

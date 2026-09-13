@@ -761,6 +761,12 @@ button {
   font-weight: 700;
 }
 
+/* Active-scan "rating × factor" screen: price sits under factor × card rating. */
+.deal-rating {
+  color: #38bdf8;
+  font-weight: 700;
+}
+
 .deal-price {
   font-family: var(--font-mono), monospace;
   font-size: 12px;

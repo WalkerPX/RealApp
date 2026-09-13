@@ -10,6 +10,7 @@ import {
   boostLabel,
   listingPlayerLabel,
   listingPrice,
+  listingRating,
   normName,
   playerMatches,
   seasonErrorMessage,
@@ -30,6 +31,11 @@ const MAX_BUCKET_PAGES = 60; // safety ceiling per rarity/type bucket (10/page)
  * paged until fully covered (the API's listingCount for that query) so the
  * scanned count matches the market; time-boxed and page-capped for safety.
  * Returns best-first by upside (max of FMV gap / remaining margin).
+ *
+ * `mode: "rating"` swaps the whole screen: instead of an FMV discount (or ROI)
+ * a listing qualifies when its price is under `ratingFactor` × the card's own
+ * rating. No FMV/earnings lookups are made in that mode — the rating is already
+ * on the listing — so the scan is fast and spends no lookup budget.
  */
 export async function scanDeals(f: DealFilters): Promise<DealsResult> {
   const started = Date.now();
@@ -40,7 +46,9 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
   let lookedUp = 0;
   let timedOut = false;
 
-  const roiEligible = CURRENT_SEASONS[f.sport] !== f.season;
+  const ratingMode = f.mode === "rating";
+  const factor = f.ratingFactor && f.ratingFactor > 0 ? f.ratingFactor : 12;
+  const roiEligible = !ratingMode && CURRENT_SEASONS[f.sport] !== f.season;
 
   outer: for (const ltype of f.listingTypes) {
     for (const rarity of f.rarities) {
@@ -85,15 +93,24 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
           if (price == null || price <= 0) continue;
           const player = listingPlayerLabel(l);
           if (queries.length && !playerMatches(player, queries)) continue;
-          if (lookedUp >= MAX_LOOKUPS) continue; // lookup budget — scan more pages instead
+          // Lookup budget only matters in discount mode — rating mode reads
+          // everything it needs straight off the listing.
+          if (!ratingMode && lookedUp >= MAX_LOOKUPS) continue;
 
           const card = l.card ?? {};
           const level = card.boostInfo?.level ?? null;
-          const fmvKey = `${l.cardId}|${ltype}`;
-          let median = await fetchFmvMedian(l.cardId, ltype).catch(() => null);
-          lookedUp++;
-          const discountPct =
-            median && median > 0 ? ((median - price) / median) * 100 : null;
+          const rating = listingRating(l);
+          let median: number | null = null;
+          let discountPct: number | null = null;
+
+          if (ratingMode) {
+            if (rating == null) continue; // no rating on the listing — can't screen it
+          } else {
+            median = await fetchFmvMedian(l.cardId, ltype).catch(() => null);
+            lookedUp++;
+            discountPct =
+              median && median > 0 ? ((median - price) / median) * 100 : null;
+          }
 
           // ROI: only for bulk player passes of past seasons (play cards have
           // no earnings calendar; current seasons have no future dates yet).
@@ -114,9 +131,12 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
             if (earn) remaining = earn.remaining;
           }
 
-          const isDiscountDeal = discountPct != null && discountPct >= f.minDiscountPct;
-          const isRoiDeal = remaining != null && remaining > price;
-          if (!isDiscountDeal && !isRoiDeal) continue;
+          const isDiscountDeal =
+            !ratingMode && discountPct != null && discountPct >= f.minDiscountPct;
+          const isRoiDeal = !ratingMode && remaining != null && remaining > price;
+          const ratingCap = ratingMode && rating != null ? rating * factor : null;
+          const isRatingDeal = ratingCap != null && price < ratingCap;
+          if (!isDiscountDeal && !isRoiDeal && !isRatingDeal) continue;
 
           seen.add(l.id);
           out.push({
@@ -135,10 +155,16 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
             url: realListingUrl(l.id),
             isDiscountDeal,
             isRoiDeal,
-            upside: Math.max(
-              remaining != null ? remaining - price : -1,
-              median != null ? median - price : -1
-            ),
+            rating,
+            isRatingDeal,
+            ratingCap,
+            // In rating mode the "upside" is how far under the ceiling it sits.
+            upside: isRatingDeal
+              ? (ratingCap as number) - price
+              : Math.max(
+                  remaining != null ? remaining - price : -1,
+                  median != null ? median - price : -1
+                ),
           });
         }
         cursor = listings.reduce(
