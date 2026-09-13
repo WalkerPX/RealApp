@@ -5,6 +5,7 @@ import { playerBoostUrl } from "@/lib/real-api";
 import ShopPanel from "@/components/shop-panel";
 import MonitorPanel, { logMonitor } from "@/components/monitor-panel";
 import EarningsPanel from "@/components/earnings-panel";
+import PendingPanel from "@/components/pending-panel";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -162,7 +163,7 @@ function roleTitle(sport: Sport, role: PlayerRole): string {
 }
 
 export default function Page() {
-  const [view, setView] = useState<"boost" | "shop" | "rax">("boost");
+  const [view, setView] = useState<"boost" | "shop" | "rax" | "pending">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
@@ -281,6 +282,16 @@ export default function Page() {
           >
             Rax
           </button>
+          <button
+            key="pending"
+            role="tab"
+            aria-selected={view === "pending"}
+            className={`sport-pill shop ${view === "pending" ? "active" : ""}`}
+            onClick={() => setView("pending")}
+            title="Rax today's games have earned so far — paid at the next 07:00 ET"
+          >
+            Pending
+          </button>
         </div>
 
         {view === "boost" && (
@@ -309,6 +320,8 @@ export default function Page() {
         <ShopPanel showTools={devTools} />
       ) : view === "rax" ? (
         <EarningsPanel />
+      ) : view === "pending" ? (
+        <PendingPanel />
       ) : (
         <>
           {error && <div className="error-banner">{error}</div>}

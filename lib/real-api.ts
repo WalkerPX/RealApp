@@ -166,6 +166,32 @@ export async function getTodaysSchedule(sport: Sport): Promise<{
   return { day: l.day ?? "", games: l.games ?? [] };
 }
 
+/** Per-player box scores for one game — the live stat line Real scores cards
+ * from. Note these rows carry `day: null` (the game's own `day` is the truth),
+ * and the endpoint is one call per game, so callers should narrow the slate
+ * before asking. */
+export interface PlayerBoxScore {
+  id: number;
+  playerId: number;
+  teamId: number;
+  position?: string | null;
+  /** Real Rating for the game so far — what card earnings are derived from. */
+  value?: string | number | null;
+  didNotPlay?: boolean;
+  status?: string | null;
+  statValues?: { type: number | string; value: string | number; label?: string }[];
+}
+
+export async function getGamePlayerBoxScores(
+  sport: Sport,
+  gameId: number
+): Promise<PlayerBoxScore[]> {
+  const d = await realFetch<{ playerBoxScores?: PlayerBoxScore[] }>(
+    `/games/${gameId}/sport/${realSportKey(sport)}/stats`
+  );
+  return d.playerBoxScores ?? [];
+}
+
 /** Real's share-link encoder (salt "routing", min length 11). Player booster
  * page route shape — decode-verified against a real share link (Ohtani →
  * realapp.com/k3tvTvFwRow): [type=2, sport=4 (MLB), 0, playerEntityId].
