@@ -29,8 +29,13 @@ const MAX_ELAPSED_MS = 45_000;
 const MAX_LOOKUPS = 130; // FMV + earnings lookups per scan (~3/s of the budget)
 const MAX_BUCKET_PAGES = 200; // safety ceiling per rarity/type bucket (10/page)
 // Sequential requests only (never parallel): a rate-limit hit on Real is
-// sticky, so a small floor between requests keeps volume polite over a long scan.
-const PAGE_GAP_MS = 100;
+// sticky, so a small floor between requests keeps volume polite over a long
+// scan. The gap is jittered — a fixed millisecond metronome is itself a bot
+// fingerprint, and no real browser fetches at a perfectly constant cadence.
+const GAP_MIN_MS = 140;
+const GAP_MAX_MS = 420;
+const gap = () =>
+  GAP_MIN_MS + Math.floor(Math.random() * (GAP_MAX_MS - GAP_MIN_MS + 1));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -94,7 +99,7 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
       }
       if (id == null) unresolved.push(name);
       else if (!playerIds.includes(id)) playerIds.push(id);
-      await sleep(PAGE_GAP_MS);
+      await sleep(gap());
     }
   }
 
@@ -207,7 +212,7 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
           }
           scanned += page.listings.length;
           for (const l of page.listings) await consider(l, true, ltype);
-          await sleep(PAGE_GAP_MS);
+          await sleep(gap());
         }
       }
     }
@@ -220,7 +225,7 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
         let bucketTotal = 0; // market count for this query, from the first page
         for (let page = 0; page < MAX_BUCKET_PAGES; page++) {
           if (over()) break outer2;
-          if (page > 0) await sleep(PAGE_GAP_MS); // politeness floor between pages
+          if (page > 0) await sleep(gap()); // jittered politeness floor between pages
           let listings;
           try {
             const res = await fetchMarketplaceListings({

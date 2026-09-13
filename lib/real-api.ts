@@ -55,22 +55,60 @@ const DEVICE_DEFAULTS = {
   version: "35",
 };
 
+const deviceName = () => process.env.REAL_DEVICE_NAME ?? DEVICE_DEFAULTS.name;
+
+/** Chrome major version, read off the device-name string so the User-Agent and
+ * `real-device-name` can never drift apart (Real compares the two). */
+function chromeMajor(): string {
+  return /Chrome\/(\d+)/.exec(deviceName())?.[1] ?? "151";
+}
+
+/** Everything a real Chrome sends when realapp.com's own SPA calls this API.
+ * Node's fetch sends a bare `node` User-Agent, no Accept-Language and no fetch
+ * metadata — that combination is the loudest bot tell there is. One request
+ * from the web app carries all of:
+ *   - realapp.com → web.realapp.com is cross-*origin* but same-*site*, hence
+ *     `sec-fetch-site: same-site` plus Origin/Referer.
+ *   - only the low-entropy client hints are sent: Chrome adds sec-ch-ua-arch /
+ *     -bitness / -full-version-list only after a server opts in with Accept-CH,
+ *     which Real never sends.
+ *   - `priority: u=1, i` is Chrome 110+ fetch() boilerplate.
+ * accept-encoding is left to the runtime (undici sends `gzip, deflate`, a
+ * perfectly normal browser value) rather than forced, so responses keep
+ * decoding correctly. */
+function browserHeaders(): Record<string, string> {
+  const v = chromeMajor();
+  return {
+    "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v}.0.0.0 Safari/537.36`,
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "sec-ch-ua": `"Chromium";v="${v}", "Google Chrome";v="${v}", "Not:A-Brand";v="24"`,
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+    Priority: "u=1, i",
+    Origin: "https://realapp.com",
+    Referer: "https://realapp.com/",
+  };
+}
+
 function authHeaders(): HeadersInit {
   const authInfo = process.env.REAL_AUTH_INFO;
+  const browser = browserHeaders();
 
   // real-auth-info is the actual credential ("{userId}!{deviceId}!{token}").
   // real-session-token is optional — the tracker client runs without it.
   if (authInfo) {
     const h: Record<string, string> = {
-      Accept: "application/json",
+      ...browser,
       "real-device-type": process.env.REAL_DEVICE_TYPE ?? DEVICE_DEFAULTS.type,
-      "real-device-name": process.env.REAL_DEVICE_NAME ?? DEVICE_DEFAULTS.name,
+      "real-device-name": deviceName(),
       "real-device-uuid": process.env.REAL_DEVICE_UUID ?? DEVICE_DEFAULTS.uuid,
       "real-version": process.env.REAL_VERSION ?? DEVICE_DEFAULTS.version,
       "real-request-token": requestToken(),
       "real-auth-info": authInfo,
-      Origin: "https://realapp.com",
-      Referer: "https://realapp.com/",
     };
     if (process.env.REAL_SESSION_TOKEN) {
       h["real-session-token"] = process.env.REAL_SESSION_TOKEN;
@@ -81,12 +119,7 @@ function authHeaders(): HeadersInit {
 
   const cookie = process.env.REAL_AUTH_COOKIE;
   if (cookie) {
-    return {
-      Cookie: cookie,
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept: "application/json",
-    };
+    return { ...browser, Cookie: cookie };
   }
 
   throw new Error(
