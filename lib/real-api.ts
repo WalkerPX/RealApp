@@ -227,11 +227,19 @@ export function realListingUrl(listingId: number): string {
 // Deals scans fan out over many listings; a tiny per-instance TTL cache keeps
 // repeat FMV/earnings lookups within a scan (and across scans) cheap.
 const mktCache = new Map<string, { t: number; v: unknown }>();
+/** Slow-moving data only: FMV medians, earnings calendars. */
 const MKT_TTL = 6 * 60 * 60 * 1000;
+/** Listings + entity search are LIVE data and must never be cached. A cached
+ * page is a snapshot of auctions that have since ended/sold, and on Vercel the
+ * warm serverless instance would keep serving that dead snapshot for the whole
+ * TTL — which is exactly how "sold auctions" show up in a search. */
+const LIVE = 0;
 
-async function mktFetch<T>(path: string): Promise<T> {
-  const hit = mktCache.get(path);
-  if (hit && hit.t > Date.now()) return hit.v as T;
+async function mktFetch<T>(path: string, ttl: number = MKT_TTL): Promise<T> {
+  if (ttl > 0) {
+    const hit = mktCache.get(path);
+    if (hit && hit.t > Date.now()) return hit.v as T;
+  }
   const res = await fetch(`${BASE}${path}`, {
     headers: authHeaders(),
     cache: "no-store",
@@ -248,7 +256,7 @@ async function mktFetch<T>(path: string): Promise<T> {
     );
   }
   const data = (await res.json()) as T;
-  mktCache.set(path, { t: Date.now() + MKT_TTL, v: data });
+  if (ttl > 0) mktCache.set(path, { t: Date.now() + ttl, v: data });
   if (mktCache.size > 400) {
     const now = Date.now();
     for (const [k, e] of mktCache) if (e.t < now) mktCache.delete(k);
@@ -278,7 +286,8 @@ export async function fetchMarketplaceListings(params: {
   });
   if (params.beforeEndsAt) q.set("beforeEndsAt", params.beforeEndsAt);
   const d = await mktFetch<{ listings?: RawListing[]; listingCount?: number }>(
-    `/cardmarketplacelistings?${q}`
+    `/cardmarketplacelistings?${q}`,
+    LIVE
   );
   return { listings: d.listings ?? [], listingCount: d.listingCount ?? 0 };
 }
@@ -319,7 +328,8 @@ export async function searchPlayerId(
   name: string
 ): Promise<number | null> {
   const d = await mktFetch<{ entities?: SearchEntity[] }>(
-    `/search?query=${encodeURIComponent(name)}&sport=${encodeURIComponent(sport)}`
+    `/search?query=${encodeURIComponent(name)}&sport=${encodeURIComponent(sport)}`,
+    LIVE
   );
   const players = (d.entities ?? []).filter((e) => e.type === "player");
   const full = (e: SearchEntity) =>
@@ -350,7 +360,8 @@ export async function fetchPlayerListings(params: {
     filterEntityId: String(params.playerId),
   });
   const d = await mktFetch<{ listings?: RawListing[]; listingCount?: number }>(
-    `/cardmarketplacelistings?${q}`
+    `/cardmarketplacelistings?${q}`,
+    LIVE
   );
   return { listings: d.listings ?? [], listingCount: d.listingCount ?? 0 };
 }

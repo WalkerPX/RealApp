@@ -105,6 +105,11 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
   const consider = async (l: RawListing, scoped: boolean, ltype: string) => {
     if (over()) return;
     if (seen.has(l.id)) return;
+    // Real returns a bucket/player's listings soonest-ending first, so the head
+    // of every page is made of auctions that expire (or sell) within minutes.
+    // Drop anything already past its end — a dead auction is not a deal.
+    const endsAtMs = l.endsAt ? Date.parse(l.endsAt) : NaN;
+    if (Number.isFinite(endsAtMs) && endsAtMs <= Date.now()) return;
     if (f.auctionOnly && !l.canBid) return;
     const price = listingPrice(l);
     if (price == null || price <= 0) return;
