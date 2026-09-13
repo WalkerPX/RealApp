@@ -259,17 +259,15 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
 
   /** Sequential scan over one or more slices; merges and sorts the deals.
    * who = summary label when spanning multiple slices ("wlkr tracked set" /
-   * "checked players"). Honors min-discount + auctions; types/rarities are
-   * passed per call (the OTD sweep forces bulk + rare→iconic). `over` swaps
-   * the screen for this run only — the Active scan uses it to search by
-   * rating-factor instead of discount. */
+   * "checked players"). Types/rarities are passed per call (the OTD sweep
+   * forces bulk + rare→iconic); the screen (discount vs rating ×) is a single
+   * shop-wide choice, so every scan type honors the same one. */
   const runSlices = useCallback(
     async (
       slices: RunSlice[],
       listTypes: DealListingType[],
       rar: number[],
-      who: string,
-      over?: { mode: DealMode; factor: number }
+      who: string
     ) => {
       if (!slices.length) return;
       setRunning(true);
@@ -297,11 +295,9 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             players: s.players.join(", "),
             minDisc: String(minDisc),
             auctions: auctions ? "1" : "0",
+            mode: screen,
           });
-          if (over) {
-            params.set("mode", over.mode);
-            if (over.mode === "rating") params.set("factor", String(over.factor));
-          }
+          if (screen === "rating") params.set("factor", String(factor));
           const label = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
           try {
             const res = await fetch(`/api/deals?${params}`);
@@ -395,7 +391,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
         failedSlices: failed,
       });
     },
-    [minDisc, auctions]
+    [minDisc, auctions, screen, factor]
   );
 
   /** "Scan market": single slice normally; cross-sport once players are
@@ -411,8 +407,8 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   }, [running, plan, types, rarities, runSlices]);
 
   /** wlkr OTD sweep: rare→iconic bulk passes for the fixed tracked-player
-   * list, across all its sport/season slices. Honors the min-discount field
-   * and the auctions toggle; the slice list lives in lib/deals.ts. */
+   * list, across all its sport/season slices. Honors the shop-wide screen and
+   * the auctions toggle; the slice list lives in lib/deals.ts. */
   const runOtd = useCallback(async () => {
     if (running) return;
     setRunMode("otd");
@@ -445,13 +441,12 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
         slices,
         play ? ["card"] : ["userpassfull"],
         play ? [7, 6, 5, 4, 3, 2, 1] : [7, 6, 5, 4, 3],
-        play ? "wlkr active play set" : "wlkr active set",
-        { mode: screen, factor }
+        play ? "wlkr active play set" : "wlkr active set"
       );
     } finally {
       setRunMode(null);
     }
-  }, [running, runSlices, activeMode, screen, factor]);
+  }, [running, runSlices, activeMode]);
 
   const busy = running || runMode !== null;
 
@@ -480,18 +475,59 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             </select>
           </label>
           <label>
-            <span className="flabel">Min discount</span>
-            <span className="numwrap">
-              <input
-                type="number"
-                min={0}
-                max={90}
-                value={minDisc}
-                onChange={(e) => setMinDisc(Number(e.target.value) || 0)}
-              />
-              <span className="pct">%</span>
+            <span className="flabel">Screen</span>
+            <span className="seg" role="group" aria-label="Deal screen">
+              <button
+                type="button"
+                className={`seg-btn ${screen === "discount" ? "on" : ""}`}
+                onClick={() => setScreen("discount")}
+                disabled={busy}
+                title="Deal = price is at least N% under the FMV median"
+              >
+                discount
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${screen === "rating" ? "on" : ""}`}
+                onClick={() => setScreen("rating")}
+                disabled={busy}
+                title="Deal = price is under factor × the card's own rating"
+              >
+                rating ×
+              </button>
             </span>
           </label>
+          {screen === "discount" ? (
+            <label>
+              <span className="flabel">Min discount</span>
+              <span className="numwrap">
+                <input
+                  type="number"
+                  min={0}
+                  max={90}
+                  value={minDisc}
+                  onChange={(e) => setMinDisc(Number(e.target.value) || 0)}
+                />
+                <span className="pct">%</span>
+              </span>
+            </label>
+          ) : (
+            <label>
+              <span className="flabel">Rating factor</span>
+              <span className="numwrap">
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  step={1}
+                  value={factor}
+                  onChange={(e) => setFactor(Math.max(1, Number(e.target.value) || 12))}
+                  title="Price ceiling = this × the card's rating (a 5.9 card at 12× = under 70.8 rax)"
+                />
+                <span className="pct">×</span>
+              </span>
+            </label>
+          )}
           <label className="check-inline">
             <input
               type="checkbox"
@@ -594,7 +630,7 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
               </button>
             )}
             {showTools && (
-              <button className="btn otd" onClick={runActive} disabled={busy} title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (min discount applies)">
+              <button className="btn otd" onClick={runActive} disabled={busy} title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (honors the Screen choice)">
                 {running && runMode === "active" ? "scanning…" : "wlkr Active scan"}
               </button>
             )}
@@ -618,43 +654,6 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
                 >
                   play
                 </button>
-              </div>
-            )}
-            {showTools && (
-              <div className="seg" role="group" aria-label="Active scan search factor">
-                <button
-                  type="button"
-                  className={`seg-btn ${screen === "discount" ? "on" : ""}`}
-                  onClick={() => setScreen("discount")}
-                  disabled={busy}
-                  title="Deal = price is at least N% under the FMV median"
-                >
-                  discount
-                </button>
-                <button
-                  type="button"
-                  className={`seg-btn ${screen === "rating" ? "on" : ""}`}
-                  onClick={() => setScreen("rating")}
-                  disabled={busy}
-                  title="Deal = price is under factor × the card's own rating"
-                >
-                  rating ×
-                </button>
-                {screen === "rating" && (
-                  <span className="numwrap">
-                    <input
-                      type="number"
-                      min={1}
-                      max={1000}
-                      step={1}
-                      value={factor}
-                      onChange={(e) => setFactor(Math.max(1, Number(e.target.value) || 12))}
-                      disabled={busy}
-                      title="Price ceiling = this × the card's rating"
-                    />
-                    <span className="pct">×</span>
-                  </span>
-                )}
               </div>
             )}
             {running && <span className="muted-note">{sweepMsg}</span>}
