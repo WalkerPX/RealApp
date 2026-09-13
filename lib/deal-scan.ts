@@ -19,9 +19,17 @@ import {
   type DealsResult,
 } from "./deals";
 
-const MAX_ELAPSED_MS = 9_000; // keep under Vercel's 10s default function limit
-const MAX_LOOKUPS = 45; // FMV + earnings lookups per scan
-const MAX_BUCKET_PAGES = 60; // safety ceiling per rarity/type bucket (10/page)
+// The route declares maxDuration = 60 (Vercel Pro/fluid), so a scan may run
+// long — this cap stays clear of it. Each slice is its own request, so a
+// multi-sport sweep is bounded by slices × this budget, not by one call.
+const MAX_ELAPSED_MS = 45_000;
+const MAX_LOOKUPS = 130; // FMV + earnings lookups per scan (~3/s of the budget)
+const MAX_BUCKET_PAGES = 200; // safety ceiling per rarity/type bucket (10/page)
+// Sequential paging only (never parallel): a rate-limit hit on Real is sticky,
+// so a small floor between page requests keeps volume polite over a long scan.
+const PAGE_GAP_MS = 100;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Scan a filtered slice of the marketplace for deals:
@@ -61,6 +69,7 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
           timedOut = true;
           break outer;
         }
+        if (page > 0) await sleep(PAGE_GAP_MS); // politeness floor between pages
         let listings;
         try {
           const res = await fetchMarketplaceListings({
