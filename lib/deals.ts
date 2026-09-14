@@ -143,6 +143,30 @@ export const WALKER_ACTIVE_SLICES: WalkerOtdSlice[] = [
   },
 ];
 
+/** Pinned menu slices: listed at the TOP of the tracked-player menu, but kept
+ * out of the wlkr OTD bulk sweep (these are live-season players — no OTD claim
+ * dates exist for them yet). CFB 2026-27 is the everyday watch set. */
+export const WALKER_TRACKED_TOP_SLICES: WalkerOtdSlice[] = [
+  {
+    sport: "ncaaf",
+    season: 2026,
+    players: [
+      "Fame Ijeboi",
+      "Ryan Browne",
+      "Ethan Grunkemeyer",
+      "Jackson Arnold",
+      "Jayden Mavia",
+      "Asaad Waseem",
+      "KJ Duff",
+      "Malik Washington",
+      "Kamari Moulton",
+      "Marcellous Hawkins Jr",
+      "Josh Hoover",
+      "Turbo Richard",
+    ],
+  },
+];
+
 /** One selectable player occurrence in the tracked-player menu:
  * `sport|season|player` — unique per (sport, season) group. */
 export function walkerOtdKey(sport: DealSport, season: number, player: string): string {
@@ -166,12 +190,13 @@ export interface WalkerOtdMenuSport {
   seasons: WalkerOtdMenuSeason[];
 }
 
-/** Players from WALKER_OTD_SLICES grouped by sport, then season (slice
- * order preserved, players de-duped per season). */
+/** Players from the pinned top slices + WALKER_OTD_SLICES, grouped by sport,
+ * then season (source order preserved — pinned slices land first, so CFB
+ * 2026-27 sits at the top; players de-duped per season). */
 export function walkerOtdMenu(): WalkerOtdMenuSport[] {
   const sports: WalkerOtdMenuSport[] = [];
   const seenSport = new Map<DealSport, WalkerOtdMenuSport>();
-  for (const s of WALKER_OTD_SLICES) {
+  for (const s of [...WALKER_TRACKED_TOP_SLICES, ...WALKER_OTD_SLICES]) {
     let sportGroup = seenSport.get(s.sport);
     if (!sportGroup) {
       const label = DEAL_SPORTS.find((d) => d.id === s.sport)?.label ?? s.sport;

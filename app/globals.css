@@ -986,6 +986,14 @@ button {
   line-height: 1.55;
 }
 
+.modal-defaults {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 16px 0;
+}
+
 .modal-body {
   padding: 8px 16px 18px;
   overflow-y: auto;

@@ -225,6 +225,20 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
 
   const clearChecked = useCallback(() => setChecked([]), []);
 
+  /** "Default Player Card Search": flips the shop filters to the everyday CFB
+   * 2026-27 play-card screen — rating screen at 15×, common → epic. */
+  const applyDefaultSearch = useCallback(() => {
+    setSport("ncaaf");
+    setSeason(2026);
+    setScreen("rating");
+    setFactor(15);
+    setTypes(["card"]);
+    setRarities([4, 3, 2, 1]);
+    setResult(null);
+    setError(null);
+    setMenuOpen(false);
+  }, []);
+
   /**
    * Scan plan for "Scan market":
    *  - nothing checked: the current sport/season slice (typed names apply), as before;
@@ -736,6 +750,14 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
               market&quot; then runs across every sport/season slice they belong to (no dropdown
               changes needed). Typed names still only apply to the selected sport/season.
             </p>
+            <div className="modal-defaults">
+              <button className="btn sm" onClick={applyDefaultSearch} disabled={busy}>
+                Default Player Card Search
+              </button>
+              <span className="muted-note">
+                CFB 2026-27 · rating × 15 · play cards · common → epic
+              </span>
+            </div>
             <div className="modal-body">
               {OTD_MENU.map((g) => (
                 <section key={g.sport} className="menu-sport">
