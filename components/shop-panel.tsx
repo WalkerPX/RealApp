@@ -6,11 +6,14 @@ import {
   DEAL_SEASONS,
   DEAL_SPORTS,
   LISTING_TYPE_META,
+  LOW_PERRAX_FACTOR,
+  LOW_PERRAX_SLICES,
   RARITY_LABELS,
   WALKER_ACTIVE_SLICES,
   WALKER_OTD_SLICES,
   seasonErrorMessage,
   seasonLabel,
+  walkerOtdKey,
   walkerOtdMenu,
   type Deal,
   type DealListingType,
@@ -234,6 +237,25 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
     setFactor(15);
     setTypes(["card"]);
     setRarities([4, 3, 2, 1]);
+    setResult(null);
+    setError(null);
+    setMenuOpen(false);
+  }, []);
+
+  /** "Low PerRax": loads the Low PerRax watch set into the tracked-player
+   *  selection and flips the shop to the play-card rating screen at ≤11
+   *  rax/rating — "Scan market" then sweeps every sport/season slice in the
+   *  set at once. */
+  const applyLowPerRax = useCallback(() => {
+    setChecked(
+      LOW_PERRAX_SLICES.flatMap((s) =>
+        s.players.map((p) => walkerOtdKey(s.sport, s.season, p))
+      )
+    );
+    setScreen("rating");
+    setFactor(LOW_PERRAX_FACTOR);
+    setTypes(["card"]);
+    setRarities([7, 6, 5, 4, 3, 2, 1]);
     setResult(null);
     setError(null);
     setMenuOpen(false);
@@ -756,6 +778,12 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
               </button>
               <span className="muted-note">
                 CFB 2026-27 · rating × 15 · play cards · common → epic
+              </span>
+              <button className="btn sm" onClick={applyLowPerRax} disabled={busy}>
+                Low PerRax
+              </button>
+              <span className="muted-note">
+                Low PerRax set · rating × 11 · play cards · common → iconic
               </span>
             </div>
             <div className="modal-body">

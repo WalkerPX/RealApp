@@ -167,6 +167,25 @@ export const WALKER_TRACKED_TOP_SLICES: WalkerOtdSlice[] = [
   },
 ];
 
+/** "Low PerRax" preset: the cards to re-check whenever we want to know if
+ * their play cards can be bought cheaply (under LOW_PERRAX_FACTOR rax per
+ * rating point). One entry per sport/season slice; names mirror the
+ * tracked-player list so they resolve through Real's search. */
+export const LOW_PERRAX_FACTOR = 11;
+
+export const LOW_PERRAX_SLICES: WalkerOtdSlice[] = [
+  // NHL keys by STARTING year (2025 = 2025-26).
+  { sport: "nhl", season: 2025, players: ["Jake Guentzel", "Ryan Hartman"] },
+  { sport: "nhl", season: 2024, players: ["Brandon Hagel"] },
+  { sport: "nhl", season: 2023, players: ["Jake Guentzel"] },
+  // CBB keys by ENDING year (2026 = 2025-26).
+  { sport: "ncaam", season: 2026, players: ["Trey Kaufman-Renn", "Lamar Wilkerson", "Dailyn Swain"] },
+  { sport: "ncaam", season: 2025, players: ["Trey Kaufman-Renn", "Josh Hubbard"] },
+  // NBA keys by ENDING year (2024 = 2023-24).
+  { sport: "nba", season: 2024, players: ["Myles Turner"] },
+  { sport: "nba", season: 2025, players: ["Pascal Siakam"] },
+];
+
 /** One selectable player occurrence in the tracked-player menu:
  * `sport|season|player` — unique per (sport, season) group. */
 export function walkerOtdKey(sport: DealSport, season: number, player: string): string {
