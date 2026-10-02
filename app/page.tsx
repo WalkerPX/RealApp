@@ -171,10 +171,12 @@ export default function Page() {
   // same user instead of being swallowed by the effect.
   const [tabUser, setTabUser] = useState("");
   const [tabSeq, setTabSeq] = useState(0);
-  // OTD Earnings lives in the shop's tools window ("Made" → second tab) and
-  // keeps its own lookup state for the same reason.
-  const [otdUser, setOtdUser] = useState("");
-  const [otdSeq, setOtdSeq] = useState(0);
+  // OTD Earnings lives in the shop's tools window ("Made" → second tab). It
+  // opens pre-filled with the account name and loads it right away, but keeps
+  // the lookup state so another username can be read instead. `otdSeq` starts
+  // at 1 so the first mount auto-fetches; every Look up bumps it.
+  const [otdUser, setOtdUser] = useState("walkr");
+  const [otdSeq, setOtdSeq] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);

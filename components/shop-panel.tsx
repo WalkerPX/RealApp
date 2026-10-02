@@ -645,7 +645,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
             </label>
           ) : (
             <label>
-              <span className="flabel">Rating factor</span>
+              <span className="flabel">Rax Per Rating</span>
               <span className="numwrap">
                 <input
                   type="number"
@@ -909,16 +909,10 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                   </div>
                 </div>
                 <p className="muted-note modal-hint">
-                  The two presets flip the filters behind this window; the scans read the
-                  tracked-player list.
+                  The two presets flip the filters behind this window; the scans read the players
+                  picked below.
                 </p>
                 <div className="modal-body">
-                  <p className="muted-note">
-                    Tracked players behave like names in the Specific players box, so &quot;Scan
-                    market&quot; runs every sport/season slice they belong to — no dropdown
-                    changes needed. Typed names still only apply to the selected sport/season.
-                  </p>
-
                   {collection ? (
                     <>
                       <div className="sport-tabs" role="tablist" aria-label="Sport">
