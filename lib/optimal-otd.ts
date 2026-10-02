@@ -1,0 +1,292 @@
+/** Optimal OTD — pick the K cards whose On-This-Day claims earn the most rax.
+ *
+ * Rules the model encodes (all verified against Real):
+ *   - a card claims on the same month-day every year, so its claim calendar is
+ *     a set of 366 month-days with an amount on each;
+ *   - you get at most 2 claims per sport per day, so only the two best cards of
+ *     a sport count towards that day's total;
+ *   - card amounts scale linearly with the card's level, so the winning SET is
+ *     the same at every rarity/level — only the reported numbers change.
+ *
+ * Objective: maximise, over the 366 month-days, the sum of each sport's top-two
+ * card values. Plain greedy on that (submodular) objective, then swap-based
+ * local search, lands on the optimum in practice.
+ */
+import { OTD_DATA } from "./otd-optimal-data";
+import { LEVEL_MULT, RARITY_TIERS, LINEUP_SIZES } from "./otd-levels";
+
+export { LEVEL_MULT, RARITY_TIERS, LINEUP_SIZES };
+
+const DIM = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+export const MONTH_DAYS: string[] = (() => {
+  const out: string[] = [];
+  DIM.forEach((n, m) => {
+    for (let d = 1; d <= n; d++) {
+      out.push(`${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    }
+  });
+  return out;
+})();
+const DAYS = MONTH_DAYS.length;
+
+interface RawSport {
+  label: string;
+  cards: [string, number, number, [number, number][]][];
+}
+const RAW = JSON.parse(OTD_DATA) as Record<string, RawSport>;
+
+export interface OtdSportMeta {
+  id: string;
+  label: string;
+  cards: number;
+  seasonList: number[];
+}
+
+export const OTD_SPORTS: OtdSportMeta[] = Object.entries(RAW)
+  .map(([id, v]) => ({
+    id,
+    label: v.label,
+    cards: v.cards.length,
+    seasonList: Array.from(new Set(v.cards.map((c) => c[1]))).sort((a, b) => a - b),
+  }))
+  .sort((a, b) => b.cards - a.cards);
+
+export function sportLabel(id: string): string {
+  return RAW[id]?.label ?? id.toUpperCase();
+}
+
+export function seasonLabel(sport: string, season: number): string {
+  // CBB (ncaam) cards are keyed by ending year; everyone else by starting year.
+  if (sport === "ncaam" || sport === "nba") {
+    return `${season - 1}-${String(season % 100).padStart(2, "0")}`;
+  }
+  return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
+}
+
+/** Flat, solver-friendly view of every card. */
+interface Card {
+  sport: string;
+  name: string;
+  season: number;
+  playerId: number;
+  days: Int16Array; // 366, base rax (0 = no claim that month-day)
+  yearTotal: number;
+  /** Month-days the card has any claim at all (its season's games). */
+  seasonDays: number;
+}
+
+let CACHE: Card[] | null = null;
+function allCards(): Card[] {
+  if (CACHE) return CACHE;
+  const out: Card[] = [];
+  for (const [sport, v] of Object.entries(RAW)) {
+    for (const [name, season, playerId, pairs] of v.cards) {
+      const days = new Int16Array(DAYS);
+      let total = 0;
+      let played = 0;
+      for (const [i, val] of pairs) {
+        days[i] = val;
+        total += val;
+        if (val > 0) played++;
+      }
+      out.push({ sport, name, season, playerId, days, yearTotal: total, seasonDays: played });
+    }
+  }
+  CACHE = out;
+  return out;
+}
+
+/** Per sport, the second-highest card value on each month-day. Adding a card
+ * with value v to a set raises that day's top-two sum by max(0, v - second). */
+function seconds(sports: string[], set: Card[]): Map<string, Int16Array> {
+  const out = new Map<string, Int16Array>();
+  for (const s of sports) out.set(s, new Int16Array(DAYS));
+  const big = new Map<string, Int16Array>();
+  for (const s of sports) big.set(s, new Int16Array(DAYS));
+  for (const c of set) {
+    const second = out.get(c.sport);
+    const first = big.get(c.sport);
+    if (!second || !first) continue;
+    for (let i = 0; i < DAYS; i++) {
+      const v = c.days[i];
+      if (v > first[i]) {
+        second[i] = first[i];
+        first[i] = v;
+      } else if (v > second[i]) {
+        second[i] = v;
+      }
+    }
+  }
+  return out;
+}
+
+/** Top-two sum per sport per month-day, totalled. */
+function objective(sports: string[], set: Card[]): number {
+  let total = 0;
+  for (const s of sports) {
+    const cards = set.filter((c) => c.sport === s);
+    if (!cards.length) continue;
+    const big = new Int16Array(DAYS);
+    const second = new Int16Array(DAYS);
+    for (const c of cards) {
+      for (let i = 0; i < DAYS; i++) {
+        const v = c.days[i];
+        if (v > big[i]) {
+          second[i] = big[i];
+          big[i] = v;
+        } else if (v > second[i]) {
+          second[i] = v;
+        }
+      }
+    }
+    for (let i = 0; i < DAYS; i++) total += big[i] + second[i];
+  }
+  return total;
+}
+
+export interface OtdClaim {
+  sport: string;
+  name: string;
+  season: number;
+  playerId: number;
+  value: number;
+}
+
+export interface OtdCardRow {
+  sport: string;
+  sportLabel: string;
+  name: string;
+  season: number;
+  playerId: number;
+  /** Base rax this card is actually claimed for over a year. */
+  contribBase: number;
+  /** Month-days where it wins one of its sport's two daily claims. */
+  claimedDays: number;
+  /** Month-days it has any claim at all (i.e. its season's games). */
+  seasonDays: number;
+}
+
+export interface OtdSolution {
+  sports: string[];
+  k: number;
+  totalBase: number;
+  cards: OtdCardRow[];
+  /** month-day -> that day's total base rax from the lineup. */
+  byDay: Record<string, number>;
+  /** month-day -> who earned it that day. */
+  dayClaims: Record<string, OtdClaim[]>;
+}
+
+export function solveOtd(sports: string[] | null, k: number): OtdSolution {
+  const cards = allCards();
+  const active = (sports && sports.length ? sports : OTD_SPORTS.map((s) => s.id)).filter(
+    (s) => RAW[s]
+  );
+  const pool = cards.filter((c) => active.includes(c.sport));
+
+  const set: Card[] = [];
+  for (let step = 0; step < k && set.length < pool.length; step++) {
+    const t2 = seconds(active, set);
+    let bestGain = 0;
+    let bestCard: Card | null = null;
+    for (const c of pool) {
+      if (set.includes(c)) continue;
+      const t = t2.get(c.sport)!;
+      let g = 0;
+      for (let i = 0; i < DAYS; i++) {
+        const v = c.days[i];
+        if (v > t[i]) g += v - t[i];
+      }
+      if (g > bestGain) {
+        bestGain = g;
+        bestCard = c;
+      }
+    }
+    if (!bestCard) break;
+    set.push(bestCard);
+  }
+
+  let current = objective(active, set);
+  for (let pass = 0; pass < 40; pass++) {
+    let improved = false;
+    for (let r = 0; r < set.length; r++) {
+      const rest = set.filter((_, i) => i !== r);
+      const t2 = seconds(active, rest);
+      let bestGain = 0;
+      let bestCard: Card | null = null;
+      for (const c of pool) {
+        if (set.includes(c)) continue;
+        const t = t2.get(c.sport)!;
+        let g = 0;
+        for (let i = 0; i < DAYS; i++) {
+          const v = c.days[i];
+          if (v > t[i]) g += v - t[i];
+        }
+        if (g > bestGain) {
+          bestGain = g;
+          bestCard = c;
+        }
+      }
+      if (bestCard) {
+        const cand = [...rest, bestCard];
+        const val = objective(active, cand);
+        if (val > current) {
+          set.length = 0;
+          set.push(...cand);
+          current = val;
+          improved = true;
+          break;
+        }
+      }
+    }
+    if (!improved) break;
+  }
+
+  // Accounting: each month-day, the two best cards of each sport claim.
+  const byDay: Record<string, number> = {};
+  const dayClaims: Record<string, OtdClaim[]> = {};
+  const contrib = new Map<Card, number>();
+  const claimDays = new Map<Card, number>();
+  for (const c of set) {
+    contrib.set(c, 0);
+    claimDays.set(c, 0);
+  }
+  let total = 0;
+  for (let i = 0; i < DAYS; i++) {
+    const md = MONTH_DAYS[i];
+    let dayTotal = 0;
+    const claims: OtdClaim[] = [];
+    for (const s of active) {
+      const contenders = set.filter((c) => c.sport === s && c.days[i] > 0);
+      if (!contenders.length) continue;
+      contenders.sort((a, b) => b.days[i] - a.days[i]);
+      for (const c of contenders.slice(0, 2)) {
+        const v = c.days[i];
+        contrib.set(c, (contrib.get(c) ?? 0) + v);
+        claimDays.set(c, (claimDays.get(c) ?? 0) + 1);
+        dayTotal += v;
+        claims.push({ sport: s, name: c.name, season: c.season, playerId: c.playerId, value: v });
+      }
+    }
+    if (dayTotal > 0) {
+      byDay[md] = dayTotal;
+      dayClaims[md] = claims;
+      total += dayTotal;
+    }
+  }
+
+  const rows: OtdCardRow[] = set
+    .map((c) => ({
+      sport: c.sport,
+      sportLabel: sportLabel(c.sport),
+      name: c.name,
+      season: c.season,
+      playerId: c.playerId,
+      contribBase: contrib.get(c) ?? 0,
+      claimedDays: claimDays.get(c) ?? 0,
+      seasonDays: c.seasonDays,
+    }))
+    .sort((a, b) => b.contribBase - a.contribBase);
+
+  return { sports: active, k: set.length, totalBase: total, cards: rows, byDay, dayClaims };
+}

@@ -1507,3 +1507,207 @@ button {
     font-size: 11px;
   }
 }
+
+/* ── Optimal OTD ──────────────────────────────────────── */
+.ootd-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ootd-body {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.ootd-rail {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ootd-rail-label {
+  margin: 10px 0 2px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.ootd-rail-label:first-child {
+  margin-top: 0;
+}
+
+.ootd-rail-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ootd-rail-btns .btn {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.btn.ghost.sm.on {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.ootd-rail-note {
+  margin: 14px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.ootd-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ootd-sum {
+  margin-bottom: 2px;
+}
+
+.ootd-sum-line {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.ootd-total {
+  margin: 2px 0 0;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ootd-total-unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ootd-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ootd-day {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.ootd-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.ootd-day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ootd-day-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ootd-day-name {
+  font-weight: 600;
+}
+
+.ootd-day-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ootd-day-val {
+  margin-left: auto;
+  font-family: var(--font-mono), monospace;
+  font-weight: 700;
+  color: var(--accent-soft);
+}
+
+.ootd-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.ootd-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+
+.ootd-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ootd-card-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.ootd-card-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ootd-card-val {
+  margin-top: 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-soft);
+}
+
+.ootd-foot {
+  margin-top: 2px;
+}
+
+@media (max-width: 760px) {
+  .ootd-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ootd-rail {
+    position: static;
+  }
+  .ootd-rail-btns {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .ootd-rail-btns .btn {
+    width: auto;
+  }
+}

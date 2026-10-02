@@ -6,6 +6,7 @@ import ShopPanel from "@/components/shop-panel";
 import MonitorPanel, { logMonitor } from "@/components/monitor-panel";
 import EarningsPanel from "@/components/earnings-panel";
 import PendingPanel from "@/components/pending-panel";
+import OptimalOtdPanel from "@/components/optimal-otd-panel";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
@@ -163,7 +164,7 @@ function roleTitle(sport: Sport, role: PlayerRole): string {
 }
 
 export default function Page() {
-  const [view, setView] = useState<"boost" | "marketplace" | "pending">("boost");
+  const [view, setView] = useState<"boost" | "marketplace" | "pending" | "optimal">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
   const [username, setUsername] = useState("");
   // Rax Earned Today takes a username too. `tabUser` is the submitted name and
@@ -278,6 +279,16 @@ export default function Page() {
           ))}
           <div className="side-tabs">
             <button
+              key="optimal"
+              role="tab"
+              aria-selected={view === "optimal"}
+              className={`sport-pill tab ${view === "optimal" ? "active" : ""}`}
+              onClick={() => setView("optimal")}
+              title="Best On-This-Day lineups per sport, by lineup size and rarity"
+            >
+              Optimal OTD
+            </button>
+            <button
               key="marketplace"
               role="tab"
               aria-selected={view === "marketplace"}
@@ -376,6 +387,8 @@ export default function Page() {
         />
       ) : view === "pending" ? (
         <PendingPanel username={tabUser.trim()} seq={tabSeq} />
+      ) : view === "optimal" ? (
+        <OptimalOtdPanel />
       ) : (
         <>
           {error && <div className="error-banner">{error}</div>}
