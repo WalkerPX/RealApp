@@ -25,6 +25,7 @@ const REAL_SPORT_KEY: Record<Sport, string> = {
   cfb: "ncaaf",
   nfl: "nfl",
   nhl: "nhl",
+  nba: "nba",
   fc: "soccer",
 };
 
@@ -241,6 +242,7 @@ const ROUTE_SPORT: Partial<Record<Sport, number>> = {
   cfb: 11,
   wnba: 12,
   fc: 14,
+  nhl: 7,
 };
 
 /** Public share link for a player's booster page — null when that sport's

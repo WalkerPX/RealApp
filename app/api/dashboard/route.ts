@@ -18,6 +18,7 @@ import { planBoosts, type PlayerRole } from "@/lib/boost-plan";
 import { buildWnbaDashboard } from "@/lib/wnba-dash";
 import { buildCfbDashboard } from "@/lib/cfb-dash";
 import { buildNflDashboard } from "@/lib/nfl-dash";
+import { buildNhlDashboard } from "@/lib/nhl-dash";
 import { buildFcDashboard } from "@/lib/fc-dash";
 import {
   SUPPORTED_SPORTS,
@@ -29,6 +30,17 @@ import {
 export const dynamic = "force-dynamic";
 
 const SPORT_IDS = new Set(SUPPORTED_SPORTS.map((s) => s.id));
+
+/** Sports with a dashboard layer built. The rest are advertised (NBA) but
+ * stay disabled until their pipeline lands. */
+const IMPLEMENTED = new Set<Sport>(["mlb", "wnba", "cfb", "nfl", "nhl", "fc"]);
+
+/** NHL keys its sets by STARTING year (2026 = the 2026-27 set) and rolls the
+ * set over in October — so Jan–Sep belong to the previous starting year. */
+function nhlBoostSeason(dayET: string): number {
+  const [y, m] = dayET.split("-").map(Number);
+  return m >= 10 ? y : y - 1;
+}
 
 // Game hasn't started: use active-roster projection, not a (404) boxscore.
 // MLB reports these as "Scheduled" early, then "Pre-Game"/"Warmup" close to
@@ -104,15 +116,9 @@ export async function GET(req: NextRequest) {
   if (!SPORT_IDS.has(sport)) {
     return NextResponse.json({ error: `Unsupported sport "${sportRaw}"` }, { status: 400 });
   }
-  if (
-    sport !== "mlb" &&
-    sport !== "wnba" &&
-    sport !== "cfb" &&
-    sport !== "nfl" &&
-    sport !== "fc"
-  ) {
+  if (!IMPLEMENTED.has(sport)) {
     return NextResponse.json(
-      { error: "Only MLB, WNBA, CFB, NFL and FC are implemented so far" },
+      { error: "Only MLB, WNBA, CFB, NFL, NHL and FC are implemented so far" },
       { status: 400 }
     );
   }
@@ -137,6 +143,9 @@ export async function GET(req: NextRequest) {
       cfb: 2026,
       nfl: 2026,
       fc: 2026,
+      // NHL rolls over in October, so its set year is derived from today
+      // (2026-27 set while the 2025-26 one is still on the shelf).
+      nhl: nhlBoostSeason(day),
     };
     const season = BOOST_SEASONS[sport] ?? new Date().getFullYear();
     const isSelf = sessionUserId() !== null && sessionUserId() === user.id;
@@ -283,6 +292,13 @@ export async function GET(req: NextRequest) {
       respDay = nf.day;
       for (const c of nf.cards) cards.push(c);
       for (const c of nf.candidates) candidates.push(c);
+    } else if (sport === "nhl") {
+      // ── NHL layer (ESPN mapping by hockey abbreviation/name; skaters and
+      // goalies — goalies draw save-side booster stats) ──
+      const nh = await buildNhlDashboard(allPasses, sched, isSelf);
+      respDay = nh.day;
+      for (const c of nh.cards) cards.push(c);
+      for (const c of nh.candidates) candidates.push(c);
     } else {
       // ── FC layer (soccer; Real slate only — club plays today) ──
       const fc = await buildFcDashboard(allPasses, sched, isSelf);

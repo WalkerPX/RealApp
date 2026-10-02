@@ -15,6 +15,10 @@ export interface PlanCandidate {
    * (e.g. soccer: keeper → SAVE, outfielder → GOAL/AST/DUEL). When set it
    * overrides the role's default preferences and bans nothing. */
   statPrefs?: string[];
+  /** Hard constraint for sports where an off-list stat is worthless on the
+   * card (hockey: a forward can't earn saves). Cards only ever receive a stat
+   * from `statPrefs` — no "any in stock" last resort. */
+  strictStats?: boolean;
 }
 
 interface StatPick {
@@ -28,7 +32,8 @@ interface StatPick {
 function takeStat(
   group: BoosterRarityGroup,
   preferredKeys: string[],
-  bannedKey?: string
+  bannedKey?: string,
+  strict?: boolean
 ): StatPick | null {
   for (const key of preferredKeys) {
     const entry = group.statBoostKeyInfo.find(
@@ -44,6 +49,7 @@ function takeStat(
       };
     }
   }
+  if (strict) return null;
   // Any in-stock stat as last resort (never the banned one)
   const any = group.statBoostKeyInfo.find(
     (s) => s.count > 0 && s.statBoostKey !== bannedKey
@@ -65,7 +71,8 @@ function takeFromRarity(
   rarity: number,
   role: PlayerRole,
   kTop25: boolean,
-  statPrefs?: string[]
+  statPrefs?: string[],
+  strict?: boolean
 ): { pick: StatPick; group: BoosterRarityGroup } | null {
   const group = groups.find((g) => g.rarity === rarity && g.count > 0);
   if (!group) return null;
@@ -84,7 +91,7 @@ function takeFromRarity(
         : ["3", "5"]
       : ["2_11", "10", "3", "5", "70"];
   const banned = custom || kAllowed ? undefined : "70";
-  const pick = takeStat(group, preferred, banned);
+  const pick = takeStat(group, preferred, banned, custom && strict);
   if (!pick) return null;
   group.count -= 1;
   return { pick, group };
@@ -128,7 +135,14 @@ export function planBoosts(
 
   for (const c of ranked) {
     for (const rarity of tiers(c.role, c.score)) {
-      const taken = takeFromRarity(groups, rarity, c.role, c.kTop25 === true, c.statPrefs);
+      const taken = takeFromRarity(
+        groups,
+        rarity,
+        c.role,
+        c.kTop25 === true,
+        c.statPrefs,
+        c.strictStats === true
+      );
       if (!taken) continue;
       const { pick, group } = taken;
       out.set(c.passId, {

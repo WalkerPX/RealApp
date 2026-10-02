@@ -1,4 +1,4 @@
-export type Sport = "mlb" | "wnba" | "cfb" | "nfl" | "nhl" | "fc";
+export type Sport = "mlb" | "wnba" | "cfb" | "nfl" | "nhl" | "nba" | "fc";
 
 export const SUPPORTED_SPORTS: {
   id: Sport;
@@ -9,7 +9,8 @@ export const SUPPORTED_SPORTS: {
   { id: "wnba", label: "WNBA", implemented: true },
   { id: "cfb", label: "CFB", implemented: true },
   { id: "nfl", label: "NFL", implemented: true },
-  { id: "nhl", label: "NHL", implemented: false },
+  { id: "nhl", label: "NHL", implemented: true },
+  { id: "nba", label: "NBA", implemented: false },
   { id: "fc", label: "FC", implemented: true },
 ];
 
