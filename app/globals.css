@@ -522,10 +522,17 @@ button {
   text-decoration: underline;
 }
 
-/* ── Shop (deals) ────────────────────────────────────────── */
+/* ── Marketplace / OTD Earnings / Rax Earned Today ───────── */
 
-.sport-pill.shop {
+/* The three non-boost tabs sit together, pushed to the right edge as one
+   group, spaced exactly like the sport pills (same 8px gap as .sports). */
+.side-tabs {
+  display: flex;
+  gap: 8px;
   margin-left: auto;
+}
+
+.sport-pill.tab {
   border-color: var(--accent);
   color: var(--accent-soft);
 }

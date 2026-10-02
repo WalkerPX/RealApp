@@ -163,9 +163,14 @@ function roleTitle(sport: Sport, role: PlayerRole): string {
 }
 
 export default function Page() {
-  const [view, setView] = useState<"boost" | "shop" | "rax" | "pending">("boost");
+  const [view, setView] = useState<"boost" | "marketplace" | "earnings" | "pending">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
   const [username, setUsername] = useState("");
+  // OTD Earnings / Rax Earned Today take a username too. `tabUser` is the
+  // submitted name and `tabSeq` bumps on every Look up, so pressing the button
+  // twice re-reads the same user instead of being swallowed by the effect.
+  const [tabUser, setTabUser] = useState("");
+  const [tabSeq, setTabSeq] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
@@ -264,34 +269,37 @@ export default function Page() {
               {s.label}
             </button>
           ))}
-          <button
-            key="shop"
-            role="tab"
-            aria-selected={view === "shop"}
-            className={`sport-pill shop ${view === "shop" ? "active" : ""}`}
-            onClick={() => setView("shop")}
-          >
-            Shop
-          </button>
-          <button
-            key="rax"
-            role="tab"
-            aria-selected={view === "rax"}
-            className={`sport-pill shop ${view === "rax" ? "active" : ""}`}
-            onClick={() => setView("rax")}
-          >
-            Rax
-          </button>
-          <button
-            key="pending"
-            role="tab"
-            aria-selected={view === "pending"}
-            className={`sport-pill shop ${view === "pending" ? "active" : ""}`}
-            onClick={() => setView("pending")}
-            title="Rax today's games have earned so far — paid at the next 07:00 ET"
-          >
-            Pending
-          </button>
+          <div className="side-tabs">
+            <button
+              key="marketplace"
+              role="tab"
+              aria-selected={view === "marketplace"}
+              className={`sport-pill tab ${view === "marketplace" ? "active" : ""}`}
+              onClick={() => setView("marketplace")}
+            >
+              Marketplace
+            </button>
+            <button
+              key="earnings"
+              role="tab"
+              aria-selected={view === "earnings"}
+              className={`sport-pill tab ${view === "earnings" ? "active" : ""}`}
+              onClick={() => setView("earnings")}
+              title="Rax earned per day — search any Real username"
+            >
+              OTD Earnings
+            </button>
+            <button
+              key="pending"
+              role="tab"
+              aria-selected={view === "pending"}
+              className={`sport-pill tab ${view === "pending" ? "active" : ""}`}
+              onClick={() => setView("pending")}
+              title="Rax today's games have earned so far — paid at the next 07:00 ET"
+            >
+              Rax Earned Today
+            </button>
+          </div>
         </div>
 
         {view === "boost" && (
@@ -314,14 +322,38 @@ export default function Page() {
             </button>
           </form>
         )}
+
+        {(view === "earnings" || view === "pending") && (
+          <form
+            className="search-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const u = tabUser.trim();
+              if (!u) return;
+              setTabUser(u);
+              setTabSeq((n) => n + 1);
+            }}
+          >
+            <input
+              value={tabUser}
+              onChange={(e) => setTabUser(e.target.value)}
+              placeholder="Real username (e.g. walkr)"
+              autoFocus
+              spellCheck={false}
+            />
+            <button className="btn" type="submit" disabled={!tabUser.trim()}>
+              Look up
+            </button>
+          </form>
+        )}
       </div>
 
-      {view === "shop" ? (
+      {view === "marketplace" ? (
         <ShopPanel showTools={devTools} />
-      ) : view === "rax" ? (
-        <EarningsPanel />
+      ) : view === "earnings" ? (
+        <EarningsPanel username={tabUser.trim()} seq={tabSeq} />
       ) : view === "pending" ? (
-        <PendingPanel />
+        <PendingPanel username={tabUser.trim()} seq={tabSeq} />
       ) : (
         <>
           {error && <div className="error-banner">{error}</div>}

@@ -24,6 +24,11 @@ interface SportRow {
 }
 
 interface RaxResponse {
+  /** Resolved account the lookup was for (null when no username was sent). */
+  userName?: string | null;
+  /** True when the name isn't the signed-in account — Real scopes historical
+   * earnings to the session account, so there is nothing else to show. */
+  otherUser?: boolean;
   day: string;
   today: string;
   total: number;
@@ -92,20 +97,21 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-export default function EarningsPanel() {
+export default function EarningsPanel({ username, seq }: { username: string; seq: number }) {
   const [data, setData] = useState<RaxResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCal, setShowCal] = useState(false);
   const [month, setMonth] = useState<string | null>(null);
 
-  const load = useCallback(async (day?: string) => {
+  const load = useCallback(async (user: string, day?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const url = day
-        ? `/api/earnings?day=${encodeURIComponent(day)}`
-        : "/api/earnings";
+      const q = new URLSearchParams();
+      if (user) q.set("username", user);
+      if (day) q.set("day", day);
+      const url = `/api/earnings${q.size ? `?${q}` : ""}`;
       const res = await fetch(url);
       const body = (await res.json()) as RaxResponse;
       if (!res.ok || body.error) {
@@ -118,6 +124,18 @@ export default function EarningsPanel() {
           msg: body.error ?? `HTTP ${res.status}`,
         });
         throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      if (body.otherUser) {
+        logMonitor({
+          tag: "earnings",
+          label: `@${body.userName} (not signed in)`,
+          status: res.status,
+          sentToReal: true,
+          ok: true,
+          msg: "Real scopes historical earnings to the session account",
+        });
+        setData(body);
+        return;
       }
       logMonitor({
         tag: "earnings",
@@ -136,9 +154,15 @@ export default function EarningsPanel() {
     }
   }, []);
 
+  // Look up runs on an explicit submit only — never on mount, and `seq` makes
+  // pressing Look up again re-read the same username.
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!seq || !username) return;
+    setMonth(null);
+    setData(null);
+    void load(username);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seq]);
 
   const cells = useMemo(() => (month ? monthCells(month) : []), [month]);
   const monthTotal = useMemo(() => {
@@ -156,17 +180,40 @@ export default function EarningsPanel() {
     return m;
   }, [data, month]);
 
+  if (!seq) {
+    return (
+      <div className="rax">
+        <p className="empty">Enter a Real username to look up rax earnings.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="rax">
       {error && <div className="error-banner">{error}</div>}
       {loading && !data && <p className="empty">Loading rax earnings…</p>}
 
-      {data && (
+      {data && data.otherUser && (
+        <div>
+          <p className="rax-label">
+            OTD earnings · <strong>@{data.userName}</strong>
+          </p>
+          <p className="rax-note">
+            Real scopes its historical earnings to the signed-in account only, so this
+            account&apos;s day ledger can&apos;t be read here. Use{" "}
+            <strong>Rax Earned Today</strong> — that tab works for any username, since it is
+            rebuilt from public box scores.
+          </p>
+        </div>
+      )}
+
+      {data && !data.otherUser && (
         <>
           <div className="rax-head">
             <div>
               <p className="rax-label">
                 Rax earned · <strong>{labelOf(data.day)}</strong>
+                {data.userName ? ` · @${data.userName}` : ""}
                 {data.detail.headerDisplay ? ` · ${data.detail.headerDisplay}` : ""}
               </p>
               <p className="rax-total">{data.detail.total.toLocaleString()}</p>
@@ -199,7 +246,7 @@ export default function EarningsPanel() {
               <button
                 className="btn ghost"
                 type="button"
-                onClick={() => void load()}
+                onClick={() => void load(username)}
                 disabled={loading}
               >
                 {loading ? "refreshing…" : "Refresh"}
@@ -256,7 +303,7 @@ export default function EarningsPanel() {
                       className={`cal-cell${day === data.day ? " today" : ""}${v ? "" : " zero"}`}
                       style={v ? { background: `rgba(56, 189, 248, ${0.1 + pct * 0.55})` } : undefined}
                       title={`${labelOf(day)} · ${v.toLocaleString()} rax`}
-                      onClick={() => void load(day)}
+                      onClick={() => void load(username, day)}
                       disabled={loading}
                     >
                       <span className="cal-dom">{Number(day.slice(8))}</span>

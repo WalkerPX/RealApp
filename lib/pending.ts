@@ -12,7 +12,8 @@
  * exactly — 154/154 card-days across MLB/WNBA/NBA/NFL/CFB/soccer — plus
  * realapp.tools' independently computed MLB rows.
  *
- *   perfRax   = round(boxScore.value × RATING_TO_RAX[sport])
+ *   perfRax   = payout for boxScore.value — `rating × rate` (RATING_TO_RAX),
+ *               or the interpolated payout table where one exists (NBA/NHL)
  *   cardMult  = CARD_MULT[pass.boostInfo.level]
  *   boostMult = BOOSTER_MULT[pass.boosterCardInfo.rarity]   (0 when no booster)
  *   statBoost = statValue(boxScore, boosterCardInfo.statBoostKey)
@@ -48,14 +49,23 @@ const BOOST_SEASONS: Record<string, number> = {
   wnba: 2026,
   cfb: 2026,
   nfl: 2026,
+  nhl: nhlSeason(),
   fc: 2026,
 };
+
+/** NHL keys its sets by STARTING year and rolls over in October, so Jan–Sep
+ * belong to the previous starting year. */
+function nhlSeason(): number {
+  const [y, m] = earningsDay().split("-").map(Number);
+  return m >= 10 ? y : y - 1;
+}
 
 const SPORTS: { id: Sport; label: string }[] = [
   { id: "mlb", label: "MLB" },
   { id: "wnba", label: "WNBA" },
   { id: "cfb", label: "CFB" },
   { id: "nfl", label: "NFL" },
+  { id: "nhl", label: "NHL" },
   { id: "fc", label: "FC" },
 ];
 
@@ -67,28 +77,114 @@ const CARD_MULT: Record<number, number> = { 0: 0, 1: 2, 2: 3, 3: 4, 4: 10, 5: 25
 const BOOSTER_MULT: Record<number, number> = { 3: 10, 4: 15, 5: 25 };
 
 /** Rax per Real-Rating point, keyed by the sport string Real returns on a pass
- * ("ncaaf"/"soccer", not the app's "cfb"/"fc" tab ids). Pitchers sit on a
- * different rating scale than hitters. */
+ * ("ncaaf"/"soccer", not the app's "cfb"/"fc" tab ids). Values as Real publishes
+ * them: NFL and CFB pay defenders above the offense, MLB splits batters from
+ * starters and relievers, NHL sits at 1.2x. */
 const RATING_TO_RAX: Record<string, number> = {
   mlb: 2,
   wnba: 2,
-  nba: 2,
-  ncaaf: 5,
-  nfl: 5,
+  nba: 1,
+  ncaaf: 5, // offense — defenders earn 8
+  nfl: 5, // offense — defenders earn 7
+  nhl: 1.2,
   soccer: 3.5,
 };
-const PITCHER_K = 3;
+
+/** MLB arms: starters 3x, relievers 5x. */
+const MLB_STARTER = 3;
+const MLB_RELIEVER = 5;
+
+/** NFL/CFB defenders are paid above the offense. Real reports defensive cards
+ * with the same group tags in both feeds (DL/DB/LB), so one set covers both. */
+const DEFENSE_POS = new Set([
+  "DL", "DE", "DT", "NT", "EDGE", "LB", "ILB", "OLB", "MLB",
+  "CB", "DB", "S", "SS", "FS", "SAF",
+]);
+const NFL_DEFENSE = 7;
+const CFB_DEFENSE = 8;
+
+/** Relievers first — a relief appearance is worth more than a start. */
+const RELIEF_POS = new Set(["RP", "CL", "CP"]);
+const PITCHER_POS = new Set(["P", "SP", "RP", "CL", "CP"]);
 
 /** Real's sport key → the app's tab id. */
 const SPORT_ALIAS: Record<string, string> = { ncaaf: "cfb", soccer: "fc" };
 
-const PITCHER_POS = new Set(["P", "SP", "RP"]);
-
-function ratingToRax(sport: string, position?: string | null): number {
+/** Rax per rating point for a card. Exported so the table can be checked
+ * directly rather than only through a live game. */
+export function ratingToRax(sport: string, position?: string | null): number {
+  const pos = (position ?? "").toUpperCase();
   if (sport === "mlb") {
-    return PITCHER_POS.has((position ?? "").toUpperCase()) ? PITCHER_K : RATING_TO_RAX.mlb;
+    if (RELIEF_POS.has(pos)) return MLB_RELIEVER;
+    if (PITCHER_POS.has(pos)) return MLB_STARTER;
+    return RATING_TO_RAX.mlb;
   }
+  if (sport === "nfl") return DEFENSE_POS.has(pos) ? NFL_DEFENSE : RATING_TO_RAX.nfl;
+  if (sport === "ncaaf") return DEFENSE_POS.has(pos) ? CFB_DEFENSE : RATING_TO_RAX.ncaaf;
   return RATING_TO_RAX[sport] ?? 2;
+}
+
+/** A pitcher's card only ever says "P"; the box score row is what separates a
+ * start from a relief appearance. Prefer the game's position when the card's
+ * own is that generic placeholder. */
+function bestPos(cardPos?: string | null, gamePos?: string | null): string | null {
+  const c = (cardPos ?? "").toUpperCase();
+  const g = (gamePos ?? "").toUpperCase();
+  if (c === "P" && g) return g;
+  return c || g || null;
+}
+
+/** NBA and NHL no longer pay a clean multiple above a middling rating: the
+ * points Real quotes (and the ones seen on settled cards — Bouchard, 11 rating,
+ * 27 rax) sit on a curve, closer to a hardcoded table than `rating × rate`.
+ * Points are stored per sport and interpolated between; outside the tabulated
+ * range the published multiplier takes over. Add points here as they're
+ * confirmed — the tables are the whole model. */
+const PAYOUT_TABLE: Record<string, [rating: number, rax: number][]> = {
+  nba: [
+    [5, 6],
+    [7, 12],
+    [8, 16],
+    [10, 24],
+  ],
+  nhl: [
+    [5, 7],
+    [7, 12],
+    [8, 16],
+    [10, 23],
+    [11, 27],
+  ],
+};
+
+/** Performance rax for one rating. Sports without a table pay `rating × rate`.
+ * Below a table the flat rate applies (that is the band the old model was
+ * validated on); above it the last segment's slope carries on, so a hot game
+ * keeps its curve instead of falling back to the far smaller flat payout. */
+export function performanceRax(
+  sport: string,
+  position: string | null | undefined,
+  rating: number
+): number {
+  const rate = ratingToRax(sport, position);
+  const table = PAYOUT_TABLE[sport];
+  if (!table || !Number.isFinite(rating)) return Math.round(rating * rate);
+  const [rFirst] = table[0];
+  const [rLast, vLast] = table[table.length - 1];
+  if (rating < rFirst) return Math.round(rating * rate);
+  if (rating > rLast) {
+    const [rPrev, vPrev] = table[table.length - 2];
+    const slope = (vLast - vPrev) / (rLast - rPrev);
+    return Math.max(0, Math.round(vLast + (rating - rLast) * slope));
+  }
+  for (const [r, v] of table) if (rating === r) return v;
+  for (let i = 1; i < table.length; i++) {
+    const [r0, v0] = table[i - 1];
+    const [r1, v1] = table[i];
+    if (rating > r0 && rating < r1) {
+      return Math.round(v0 + ((rating - r0) / (r1 - r0)) * (v1 - v0));
+    }
+  }
+  return Math.round(rating * rate);
 }
 
 function tabIdOf(sport: string): string {
@@ -272,7 +368,7 @@ function scoreCard(
 ): PendingCardRow | null {
   const sport = String(pass.sport ?? "");
   const value = num(bs.value);
-  const perfRax = Math.round(value * ratingToRax(sport, pass.infoDetail ?? bs.position));
+  const perfRax = performanceRax(sport, bestPos(pass.infoDetail, bs.position), value);
   const cardMult = CARD_MULT[pass.boostInfo?.level ?? 0] ?? 0;
   const rarity = Number(pass.boosterCardInfo?.rarity ?? 0);
   const boosterMult = BOOSTER_MULT[rarity] ?? 0;
@@ -308,7 +404,10 @@ function opponentOf(game: Game | undefined, teamId: number): string | null {
   return t?.displayName || t?.name || null;
 }
 
-let responseCache: { at: number; day: string; data: PendingResponse } | null = null;
+/** Keyed by account: the tab can be pointed at any username, so one user's
+ * finished load must never be served as another's. */
+let responseCache: { at: number; day: string; userId: string; data: PendingResponse } | null =
+  null;
 
 /** Reset the caches — used by the "Refresh" button's force path for the
  * response cache only; box scores are deliberately kept so a reload resumes
@@ -325,7 +424,7 @@ export async function buildPending(
   opts: { day?: string; force?: boolean } = {}
 ): Promise<PendingResponse> {
   if (!opts.force && responseCache && responseCache.at > Date.now()) {
-    return { ...responseCache.data, cached: true };
+    if (responseCache.userId === userId) return { ...responseCache.data, cached: true };
   }
 
   const deadline = Date.now() + TIME_BUDGET_MS;
@@ -482,6 +581,6 @@ export async function buildPending(
     debug,
   };
   // Only cache a complete pass — a partial one should keep filling in.
-  if (!data.partial) responseCache = { at: Date.now() + RESPONSE_TTL, day, data };
+  if (!data.partial) responseCache = { at: Date.now() + RESPONSE_TTL, day, userId, data };
   return data;
 }

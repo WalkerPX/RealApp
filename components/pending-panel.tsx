@@ -29,6 +29,10 @@ interface SportRow {
 }
 
 interface PendingResponse {
+  /** Resolved account the lookup was for (null when no username was sent). */
+  userName?: string | null;
+  /** True when the name isn't the signed-in account. */
+  otherUser?: boolean;
   day: string;
   generatedAt: string;
   total: number;
@@ -85,17 +89,20 @@ function mathLine(c: CardRow): string {
   return bits.join(" + ");
 }
 
-export default function PendingPanel() {
+export default function PendingPanel({ username, seq }: { username: string; seq: number }) {
   const [data, setData] = useState<PendingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const continues = useRef(0);
 
   const load = useCallback(async (force = false) => {
+    if (!username) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(force ? "/api/pending?force=1" : "/api/pending");
+      const q = new URLSearchParams({ username });
+      if (force) q.set("force", "1");
+      const res = await fetch(`/api/pending?${q}`);
       const body = (await res.json()) as PendingResponse;
       if (!res.ok || body.error) {
         logMonitor({
@@ -126,11 +133,17 @@ export default function PendingPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [username]);
 
+  // Look up runs on an explicit submit only — never on mount, and `seq` makes
+  // pressing Look up again re-read the same username.
   useEffect(() => {
+    if (!seq || !username) return;
+    continues.current = 0;
+    setData(null);
     void load();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seq]);
 
   // A partial load means the 40s budget ran out mid-slate; the box scores it
   // already read are cached, so the next call resumes rather than restarts.
@@ -153,6 +166,9 @@ export default function PendingPanel() {
   return (
     <div className="rax">
       {error && <div className="error-banner">{error}</div>}
+      {!seq && (
+        <p className="empty">Enter a Real username to see the rax their cards earned today.</p>
+      )}
       {loading && !data && <p className="empty">Reading today&apos;s games…</p>}
 
       {data && (
@@ -161,6 +177,7 @@ export default function PendingPanel() {
             <div>
               <p className="rax-label">
                 Pending rax · <strong>{dayLabel(data.day)}</strong>
+                {data.userName ? ` · @${data.userName}` : ""}
                 {data.sports.length > 0 && (
                   <>
                     {" · "}
@@ -217,7 +234,8 @@ export default function PendingPanel() {
           {data.sports.length === 0 ? (
             <div>
               <p className="empty">
-                No owned cards have played yet today — check back once games are underway.
+                None of {data.otherUser && data.userName ? `@${data.userName}'s` : "these"}{" "}
+                cards have played yet today — check back once games are underway.
               </p>
               {data.debug.length > 0 && (
                 <div className="debug-trace">
