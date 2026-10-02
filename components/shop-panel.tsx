@@ -155,16 +155,39 @@ function DealRow({ d, tag }: { d: Deal; tag?: string }) {
   );
 }
 
+/** /api/collection — the account's own player cards, rarest first. */
+interface CollectionPlayer {
+  name: string;
+  key: string;
+  rarity: number;
+  rarityLabel: string;
+  level: number;
+  copies: number;
+}
+
+interface CollectionSeason {
+  season: number;
+  label: string;
+  players: CollectionPlayer[];
+}
+
+interface CollectionSport {
+  id: DealSport;
+  label: string;
+  count: number;
+  seasons: CollectionSeason[];
+}
+
 interface ShopPanelProps {
-  /** Secret tools (the presets, wlkr scans + tracked-player list) shown only
-   * when the hidden "Made" toggle in the footer is on. */
-  showTools?: boolean;
+  /** Bumped by the footer "Made" button — every click raises the tools window
+   * (Quick Searches + OTD Earnings). A one-way opener, not a toggle. */
+  openMenuSeq?: number;
   /** OTD Earnings tab content — lives here so the ledger ships inside the
    * tools window instead of taking a home-page tab. */
   earningsTab?: ReactNode;
 }
 
-export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelProps) {
+export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelProps) {
   const [sport, setSport] = useState<DealSport>("mlb");
   const [season, setSeason] = useState<number>(DEAL_SEASONS.mlb[0]);
   const [types, setTypes] = useState<DealListingType[]>(["userpassfull"]);
@@ -174,7 +197,7 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
   const [auctions, setAuctions] = useState(true);
   const [checked, setChecked] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  // The tools window's tabs: quick searches (presets, scans, tracked players)
+  // The tools window's tabs: quick searches (presets, scans, player picker)
   // and the OTD Earnings ledger.
   const [menuTab, setMenuTab] = useState<"quick" | "earnings">("quick");
   const [running, setRunning] = useState(false);
@@ -194,6 +217,11 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DealsResponse | null>(null);
   const [tags, setTags] = useState<Map<number, string>>(new Map());
+  // The account's own player cards (one Real call, read when the tools window
+  // first opens) — the tracked-player list is built from these, rarest first.
+  const [collection, setCollection] = useState<CollectionSport[] | null>(null);
+  const [collectionErr, setCollectionErr] = useState<string | null>(null);
+  const [collectionSport, setCollectionSport] = useState<DealSport | null>(null);
 
   // Restore checked players after mount (avoids SSR hydration mismatch).
   useEffect(() => {
@@ -221,17 +249,57 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
     }
   }, [checked]);
 
-  // Hiding the secret tools also closes the tools window. Turning them on
-  // opens it — clicking "Made" now raises the window itself instead of
-  // scattering extra buttons into the filter row.
+  // The footer "Made" button raises the tools window — each click bumps the
+  // sequence, so the window re-opens even after it was closed with "Done".
   useEffect(() => {
-    if (showTools) {
-      setMenuTab("quick");
-      setMenuOpen(true);
-    } else {
-      setMenuOpen(false);
-    }
-  }, [showTools]);
+    if (!openMenuSeq) return;
+    setMenuTab("quick");
+    setMenuOpen(true);
+  }, [openMenuSeq]);
+
+  // One request, on the first open of the tools window (never on page load).
+  useEffect(() => {
+    if (!menuOpen || collection || collectionErr) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/collection");
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+        if (!alive) return;
+        const sports = (body.sports ?? []) as CollectionSport[];
+        setCollection(sports);
+        setCollectionSport(
+          (cur) =>
+            cur ??
+            sports.find((s) => s.id === "ncaaf")?.id ??
+            sports[0]?.id ??
+            null
+        );
+        logMonitor({
+          tag: "collection",
+          label: `${body.total} player cards`,
+          status: res.status,
+          sentToReal: true,
+          ok: true,
+        });
+      } catch (e) {
+        if (!alive) return;
+        setCollectionErr(e instanceof Error ? e.message : "Unknown error");
+        logMonitor({
+          tag: "collection",
+          label: "own card list",
+          status: 0,
+          sentToReal: true,
+          ok: false,
+          msg: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [menuOpen, collection, collectionErr]);
 
   const switchSport = (s: DealSport) => {
     setSport(s);
@@ -685,20 +753,6 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
                 </button>
               </div>
             )}
-
-            {showTools && (
-              <button
-                className="btn ghost sm"
-                onClick={() => {
-                  setMenuTab("quick");
-                  setMenuOpen(true);
-                }}
-                disabled={busy}
-                title="Pick which tracked players feed the cross-sport Scan market"
-              >
-                tracked players{checked.length ? ` (${checked.length})` : ""}
-              </button>
-            )}
           </div>
 
           <div className="action-col">
@@ -746,19 +800,16 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
         </div>
       )}
 
-      {showTools && menuOpen && (
+      {menuOpen && (
         <div
           className="modal-backdrop"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setMenuOpen(false);
           }}
         >
-          <div className="modal" role="dialog" aria-modal="true" aria-label="Tools">
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Walkr's Menu">
             <div className="modal-head">
-              <h2 className="modal-title">
-                tools<span className="modal-sub"> · wlkr</span>
-              </h2>
-              <span className="muted-note">{checked.length} tracked</span>
+              <h2 className="modal-title">Walkr&apos;s Menu</h2>
               <span className="modal-actions">
                 <button className="btn ghost sm" onClick={clearChecked} disabled={!checked.length}>
                   clear
@@ -769,7 +820,7 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
               </span>
             </div>
 
-            <div className="seg modal-tabs" role="tablist" aria-label="Tools tabs">
+            <div className="seg modal-tabs" role="tablist" aria-label="Menu tabs">
               <button
                 type="button"
                 role="tab"
@@ -792,60 +843,70 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
 
             {menuTab === "quick" ? (
               <>
-                <div className="modal-defaults">
-                  <button className="btn sm" onClick={applyDefaultSearch} disabled={busy}>
-                    CFB-CardSearchDefault
-                  </button>
-                  <span className="muted-note">
-                    CFB 2026-27 · rating × 15 · play cards · common → epic
-                  </span>
-                </div>
-                <div className="modal-defaults">
-                  <button className="btn sm" onClick={applyLowPerRax} disabled={busy}>
-                    Low PerRax
-                  </button>
-                  <span className="muted-note">
-                    Low PerRax set · rating × 11 · play cards · common → iconic
-                  </span>
-                </div>
-                <div className="modal-defaults">
-                  <button
-                    className="btn otd"
-                    onClick={runOtd}
-                    disabled={busy}
-                    title="Rare→Iconic bulk passes for the fixed wlkr tracked-player list (min discount applies)"
-                  >
-                    {running && runMode === "otd" ? "scanning…" : "wlkr OTD scan"}
-                  </button>
-                  <button
-                    className="btn otd"
-                    onClick={runActive}
-                    disabled={busy}
-                    title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (honors the Screen choice)"
-                  >
-                    {running && runMode === "active" ? "scanning…" : "CFB-ActivePlayerScan"}
-                  </button>
-                  <div className="seg" role="group" aria-label="Active scan card type">
-                    <button
-                      type="button"
-                      className={`seg-btn ${activeMode === "bulk" ? "on" : ""}`}
-                      onClick={() => setActiveMode("bulk")}
-                      disabled={busy}
-                      title="Bulk rating passes (rare → iconic)"
-                    >
-                      bulk
+                <div className="modal-group">
+                  <div className="modal-group-label">Misc.</div>
+                  <div className="modal-defaults">
+                    <button className="btn sm" onClick={applyLowPerRax} disabled={busy}>
+                      Low PerRax
                     </button>
-                    <button
-                      type="button"
-                      className={`seg-btn ${activeMode === "play" ? "on" : ""}`}
-                      onClick={() => setActiveMode("play")}
-                      disabled={busy}
-                      title="Individual play cards (any rarity)"
-                    >
-                      play
-                    </button>
+                    <span className="muted-note">
+                      Low PerRax set · rating × 11 · play cards · common → iconic
+                    </span>
                   </div>
-                  {running && <span className="muted-note">{sweepMsg}</span>}
+                  <div className="modal-defaults">
+                    <button
+                      className="btn otd"
+                      onClick={runOtd}
+                      disabled={busy}
+                      title="Rare→Iconic bulk passes for the fixed wlkr tracked-player list (min discount applies)"
+                    >
+                      {running && runMode === "otd" ? "scanning…" : "wlkr OTD scan"}
+                    </button>
+                    {running && <span className="muted-note">{sweepMsg}</span>}
+                  </div>
+                </div>
+
+                <div className="modal-group">
+                  <div className="modal-group-label">CFB</div>
+                  <div className="modal-defaults">
+                    <button className="btn sm" onClick={applyDefaultSearch} disabled={busy}>
+                      CFB-CardSearchDefault
+                    </button>
+                    <span className="muted-note">
+                      CFB 2026-27 · rating × 15 · play cards · common → epic
+                    </span>
+                  </div>
+                  <div className="modal-defaults">
+                    <button
+                      className="btn otd"
+                      onClick={runActive}
+                      disabled={busy}
+                      title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (honors the Screen choice)"
+                    >
+                      {running && runMode === "active" ? "scanning…" : "CFB-ActivePlayerScan"}
+                    </button>
+                    <div className="seg" role="group" aria-label="Active scan card type">
+                      <button
+                        type="button"
+                        className={`seg-btn ${activeMode === "bulk" ? "on" : ""}`}
+                        onClick={() => setActiveMode("bulk")}
+                        disabled={busy}
+                        title="Bulk rating passes (rare → iconic)"
+                      >
+                        bulk
+                      </button>
+                      <button
+                        type="button"
+                        className={`seg-btn ${activeMode === "play" ? "on" : ""}`}
+                        onClick={() => setActiveMode("play")}
+                        disabled={busy}
+                        title="Individual play cards (any rarity)"
+                      >
+                        play
+                      </button>
+                    </div>
+                    {running && <span className="muted-note">{sweepMsg}</span>}
+                  </div>
                 </div>
                 <p className="muted-note modal-hint">
                   The two presets flip the filters behind this window; the scans read the
@@ -857,31 +918,99 @@ export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelP
                     market&quot; runs every sport/season slice they belong to — no dropdown
                     changes needed. Typed names still only apply to the selected sport/season.
                   </p>
-                  {OTD_MENU.map((g) => (
-                    <section key={g.sport} className="menu-sport">
-                      <h3 className="menu-sport-title">{g.label}</h3>
-                      {g.seasons.map((sg) => (
-                        <div key={sg.season} className="menu-season">
-                          <div className="menu-season-label">{sg.label}</div>
-                          <div className="menu-players">
-                            {sg.players.map((p) => {
-                              const on = checked.includes(p.key);
-                              return (
-                                <label key={p.key} className={`menu-player ${on ? "on" : ""}`}>
-                                  <input
-                                    type="checkbox"
-                                    checked={on}
-                                    onChange={() => toggleChecked(p.key)}
-                                  />
-                                  {p.name}
-                                </label>
-                              );
-                            })}
+
+                  {collection ? (
+                    <>
+                      <div className="sport-tabs" role="tablist" aria-label="Sport">
+                        {collection.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={collectionSport === s.id}
+                            className={`sport-pill tab ${
+                              collectionSport === s.id ? "active" : ""
+                            }`}
+                            onClick={() => setCollectionSport(s.id)}
+                          >
+                            {s.label}
+                            <span className="count">{s.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {(collection.find((s) => s.id === collectionSport)?.seasons ?? []).map(
+                        (sg) => (
+                          <div key={sg.season} className="menu-season">
+                            <div className="menu-season-label">{sg.label}</div>
+                            <div className="menu-players">
+                              {sg.players.map((p) => {
+                                const on = checked.includes(p.key);
+                                return (
+                                  <label
+                                    key={p.key}
+                                    className={`menu-player ${on ? "on" : ""}`}
+                                    title={`${p.rarityLabel}${
+                                      p.level ? ` · level ${p.level}` : ""
+                                    }${p.copies > 1 ? ` · ${p.copies} copies` : ""}`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={on}
+                                      onChange={() => toggleChecked(p.key)}
+                                    />
+                                    {p.name}
+                                    <span
+                                      className="rarity-chip"
+                                      style={{ color: rarityColor(p.rarityLabel) }}
+                                    >
+                                      {p.rarityLabel}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
+                        )
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {collectionErr && (
+                        <p className="muted-note">
+                          Couldn&apos;t read your own card list ({collectionErr}) — showing the
+                          built-in wlkr OTD list instead.
+                        </p>
+                      )}
+                      {OTD_MENU.map((g) => (
+                        <section key={g.sport} className="menu-sport">
+                          <h3 className="menu-sport-title">{g.label}</h3>
+                          {g.seasons.map((sg) => (
+                            <div key={sg.season} className="menu-season">
+                              <div className="menu-season-label">{sg.label}</div>
+                              <div className="menu-players">
+                                {sg.players.map((p) => {
+                                  const on = checked.includes(p.key);
+                                  return (
+                                    <label
+                                      key={p.key}
+                                      className={`menu-player ${on ? "on" : ""}`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={on}
+                                        onChange={() => toggleChecked(p.key)}
+                                      />
+                                      {p.name}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </section>
                       ))}
-                    </section>
-                  ))}
+                    </>
+                  )}
                 </div>
               </>
             ) : (

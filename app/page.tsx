@@ -178,10 +178,10 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
-  // Hidden tools — revealed by clicking the word "Made" in the footer, which
-  // now raises the shop's tools window (Quick Searches + tracked players).
-  // Off on every page load.
-  const [devTools, setDevTools] = useState(false);
+  // The footer "Made" button is the one full-time opener for the shop's tools
+  // window (Quick Searches + OTD Earnings). Each click bumps the sequence, so
+  // the window re-opens even after it was closed with "Done".
+  const [menuSeq, setMenuSeq] = useState(0);
   // Right-hand API monitor — revealed by clicking the word "on" in the footer.
   // Off on every page load (no persistence: reload hides it again).
   const [monitorOn, setMonitorOn] = useState(false);
@@ -345,7 +345,7 @@ export default function Page() {
 
       {view === "marketplace" ? (
         <ShopPanel
-          showTools={devTools}
+          openMenuSeq={menuSeq}
           earningsTab={
             <>
               <form
@@ -439,8 +439,11 @@ export default function Page() {
         <button
           type="button"
           className="foot-made"
-          onClick={() => setDevTools((v) => !v)}
-          aria-label="toggle hidden tools"
+          onClick={() => {
+            setView("marketplace");
+            setMenuSeq((v) => v + 1);
+          }}
+          aria-label="open Walkr's Menu"
           tabIndex={0}
         >
           Made

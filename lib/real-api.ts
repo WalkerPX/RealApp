@@ -427,6 +427,17 @@ export async function fetchPlayerListings(params: {
 
 
 // ── account rax (historical earnings) ─────────────────────────
+/** Every pass an account owns — all sports, all seasons, one call. The same
+ * path with a sport/season filter narrows it; unfiltered it returns the whole
+ * collection (~500 rows for this account), which is what the shop's per-sport
+ * player menu is built from. */
+export async function getUserCollection(userId: string): Promise<UserPass[]> {
+  const data = await realFetch<{ passes?: UserPass[] }>(
+    `/userpasses/${encodeURIComponent(userId)}/passes`
+  );
+  return data.passes ?? [];
+}
+
 /** Same call, but keyed by the raw API sport key — used by the OTD ledger,
  * which also sweeps sports this app has no tab for (college basketball is
  * "ncaam"). */
