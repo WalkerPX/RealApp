@@ -163,19 +163,24 @@ function roleTitle(sport: Sport, role: PlayerRole): string {
 }
 
 export default function Page() {
-  const [view, setView] = useState<"boost" | "marketplace" | "earnings" | "pending">("boost");
+  const [view, setView] = useState<"boost" | "marketplace" | "pending">("boost");
   const [sport, setSport] = useState<Sport>("mlb");
   const [username, setUsername] = useState("");
-  // OTD Earnings / Rax Earned Today take a username too. `tabUser` is the
-  // submitted name and `tabSeq` bumps on every Look up, so pressing the button
-  // twice re-reads the same user instead of being swallowed by the effect.
+  // Rax Earned Today takes a username too. `tabUser` is the submitted name and
+  // `tabSeq` bumps on every Look up, so pressing the button twice re-reads the
+  // same user instead of being swallowed by the effect.
   const [tabUser, setTabUser] = useState("");
   const [tabSeq, setTabSeq] = useState(0);
+  // OTD Earnings lives in the shop's tools window ("Made" → second tab) and
+  // keeps its own lookup state for the same reason.
+  const [otdUser, setOtdUser] = useState("");
+  const [otdSeq, setOtdSeq] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
-  // Hidden tools (shop: "wlkr OTD scan" + tracked-player menu) — revealed by
-  // clicking the word "Made" in the footer. Off on every page load.
+  // Hidden tools — revealed by clicking the word "Made" in the footer, which
+  // now raises the shop's tools window (Quick Searches + tracked players).
+  // Off on every page load.
   const [devTools, setDevTools] = useState(false);
   // Right-hand API monitor — revealed by clicking the word "on" in the footer.
   // Off on every page load (no persistence: reload hides it again).
@@ -280,16 +285,6 @@ export default function Page() {
               Marketplace
             </button>
             <button
-              key="earnings"
-              role="tab"
-              aria-selected={view === "earnings"}
-              className={`sport-pill tab ${view === "earnings" ? "active" : ""}`}
-              onClick={() => setView("earnings")}
-              title="Rax earned per day — search any Real username"
-            >
-              OTD Earnings
-            </button>
-            <button
               key="pending"
               role="tab"
               aria-selected={view === "pending"}
@@ -323,7 +318,7 @@ export default function Page() {
           </form>
         )}
 
-        {(view === "earnings" || view === "pending") && (
+        {view === "pending" && (
           <form
             className="search-row"
             onSubmit={(e) => {
@@ -349,9 +344,34 @@ export default function Page() {
       </div>
 
       {view === "marketplace" ? (
-        <ShopPanel showTools={devTools} />
-      ) : view === "earnings" ? (
-        <EarningsPanel username={tabUser.trim()} seq={tabSeq} />
+        <ShopPanel
+          showTools={devTools}
+          earningsTab={
+            <>
+              <form
+                className="search-row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const u = otdUser.trim();
+                  if (!u) return;
+                  setOtdUser(u);
+                  setOtdSeq((n) => n + 1);
+                }}
+              >
+                <input
+                  value={otdUser}
+                  onChange={(e) => setOtdUser(e.target.value)}
+                  placeholder="Real username (e.g. walkr)"
+                  spellCheck={false}
+                />
+                <button className="btn" type="submit" disabled={!otdUser.trim()}>
+                  Look up
+                </button>
+              </form>
+              <EarningsPanel username={otdUser.trim()} seq={otdSeq} />
+            </>
+          }
+        />
       ) : view === "pending" ? (
         <PendingPanel username={tabUser.trim()} seq={tabSeq} />
       ) : (

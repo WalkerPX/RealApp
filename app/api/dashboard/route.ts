@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getBoosterInventory,
+  getGamePlayers,
   getTodaysSchedule,
   getUserPasses,
   searchUsers,
@@ -23,6 +24,7 @@ import { buildFcDashboard } from "@/lib/fc-dash";
 import {
   SUPPORTED_SPORTS,
   type DashboardCard,
+  type Game,
   type Sport,
   type UserPass,
 } from "@/lib/types";
@@ -300,8 +302,16 @@ export async function GET(req: NextRequest) {
       for (const c of nh.cards) cards.push(c);
       for (const c of nh.candidates) candidates.push(c);
     } else {
-      // ── FC layer (soccer; Real slate only — club plays today) ──
-      const fc = await buildFcDashboard(allPasses, sched, isSelf);
+      // ── FC layer (soccer) ──
+      // The slate is enough for club games, but internationals are keyed to
+      // national teams, so a club card only resolves through the game's
+      // player list. One request per game (few a day).
+      const playersInPlay = new Map<number, { game: Game; teamId: number }>();
+      for (const g of realGames) {
+        const dressed = await getGamePlayers("fc", g.id);
+        for (const p of dressed) playersInPlay.set(p.id, { game: g, teamId: p.teamId });
+      }
+      const fc = await buildFcDashboard(allPasses, sched, isSelf, playersInPlay);
       respDay = fc.day;
       for (const c of fc.cards) cards.push(c);
       for (const c of fc.candidates) candidates.push(c);
@@ -309,13 +319,22 @@ export async function GET(req: NextRequest) {
 
     // ── Booster plan (own account only: inventory is session-scoped) ──
     if (isSelf && candidates.length > 0) {
-      const anchorPass = playingTeamPasses.find((p) => p.entityType === "player") ?? playingTeamPasses[0];
-      const inventory = await getBoosterInventory(anchorPass.id, sport);
-      const plan = planBoosts(candidates, inventory);
-      for (const c of cards) {
-        // Keep the suggestion even when already boosted — it still shows what
-        // to play next; the UI marks boosted cards with a BOOSTED tag.
-        c.suggestedBooster = plan.get(c.pass.id) ?? null;
+      // Anchor on a card that is actually in play; the inventory is
+      // account-wide, so any owned pass of this sport works — including a
+      // player card whose club is nowhere on the slate (internationals).
+      const anchorPass =
+        playingTeamPasses.find((p) => p.entityType === "player") ??
+        playingTeamPasses[0] ??
+        allPasses.find((p) => p.id === candidates[0].passId) ??
+        allPasses[0];
+      if (anchorPass) {
+        const inventory = await getBoosterInventory(anchorPass.id, sport);
+        const plan = planBoosts(candidates, inventory);
+        for (const c of cards) {
+          // Keep the suggestion even when already boosted — it still shows what
+          // to play next; the UI marks boosted cards with a BOOSTED tag.
+          c.suggestedBooster = plan.get(c.pass.id) ?? null;
+        }
       }
     }
 

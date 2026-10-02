@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { logMonitor } from "@/components/monitor-panel";
 import {
   DEAL_SEASONS,
@@ -156,12 +156,15 @@ function DealRow({ d, tag }: { d: Deal; tag?: string }) {
 }
 
 interface ShopPanelProps {
-  /** Secret tools (wlkr OTD scan + tracked-player menu) shown only when the
-   * hidden "Made" toggle in the footer is on. */
+  /** Secret tools (the presets, wlkr scans + tracked-player list) shown only
+   * when the hidden "Made" toggle in the footer is on. */
   showTools?: boolean;
+  /** OTD Earnings tab content — lives here so the ledger ships inside the
+   * tools window instead of taking a home-page tab. */
+  earningsTab?: ReactNode;
 }
 
-export default function ShopPanel({ showTools = false }: ShopPanelProps) {
+export default function ShopPanel({ showTools = false, earningsTab }: ShopPanelProps) {
   const [sport, setSport] = useState<DealSport>("mlb");
   const [season, setSeason] = useState<number>(DEAL_SEASONS.mlb[0]);
   const [types, setTypes] = useState<DealListingType[]>(["userpassfull"]);
@@ -171,6 +174,9 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   const [auctions, setAuctions] = useState(true);
   const [checked, setChecked] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The tools window's tabs: quick searches (presets, scans, tracked players)
+  // and the OTD Earnings ledger.
+  const [menuTab, setMenuTab] = useState<"quick" | "earnings">("quick");
   const [running, setRunning] = useState(false);
   const [runMode, setRunMode] = useState<"market" | "otd" | "active" | null>(null);
   // wlkr Active scan card type: bulk rating passes vs individual play cards.
@@ -180,6 +186,10 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
   // rating at 12× = anything under 70.8 rax).
   const [screen, setScreen] = useState<DealMode>("discount");
   const [factor, setFactor] = useState(12);
+  // Raw text of the rating-factor box while it's being edited. The committed
+  // `factor` only follows a usable number, so clearing the box (backspacing the
+  // default 12) leaves it empty instead of snapping a value back in.
+  const [factorText, setFactorText] = useState("12");
   const [sweepMsg, setSweepMsg] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DealsResponse | null>(null);
@@ -211,9 +221,16 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
     }
   }, [checked]);
 
-  // Hiding the secret tools also closes the player menu.
+  // Hiding the secret tools also closes the tools window. Turning them on
+  // opens it — clicking "Made" now raises the window itself instead of
+  // scattering extra buttons into the filter row.
   useEffect(() => {
-    if (!showTools) setMenuOpen(false);
+    if (showTools) {
+      setMenuTab("quick");
+      setMenuOpen(true);
+    } else {
+      setMenuOpen(false);
+    }
   }, [showTools]);
 
   const switchSport = (s: DealSport) => {
@@ -235,11 +252,11 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
     setSeason(2026);
     setScreen("rating");
     setFactor(15);
+    setFactorText("15");
     setTypes(["card"]);
     setRarities([4, 3, 2, 1]);
     setResult(null);
     setError(null);
-    setMenuOpen(false);
   }, []);
 
   /** "Low PerRax": loads the Low PerRax watch set into the tracked-player
@@ -254,11 +271,11 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
     );
     setScreen("rating");
     setFactor(LOW_PERRAX_FACTOR);
+    setFactorText(String(LOW_PERRAX_FACTOR));
     setTypes(["card"]);
     setRarities([7, 6, 5, 4, 3, 2, 1]);
     setResult(null);
     setError(null);
-    setMenuOpen(false);
   }, []);
 
   /**
@@ -567,8 +584,21 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
                   min={1}
                   max={1000}
                   step={1}
-                  value={factor}
-                  onChange={(e) => setFactor(Math.max(1, Number(e.target.value) || 12))}
+                  value={factorText}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    setFactorText(t);
+                    const n = Math.floor(Number(t));
+                    if (t !== "" && Number.isFinite(n) && n >= 1) setFactor(n);
+                  }}
+                  onBlur={() => {
+                    // Empty (or junk) on the way out falls back to the last
+                    // usable factor rather than a hardcoded default.
+                    const n = Math.floor(Number(factorText));
+                    if (factorText === "" || !Number.isFinite(n) || n < 1) {
+                      setFactorText(String(factor));
+                    }
+                  }}
                   title="Price ceiling = this × the card's rating (a 5.9 card at 12× = under 70.8 rax)"
                 />
                 <span className="pct">×</span>
@@ -659,7 +689,10 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             {showTools && (
               <button
                 className="btn ghost sm"
-                onClick={() => setMenuOpen((v) => !v)}
+                onClick={() => {
+                  setMenuTab("quick");
+                  setMenuOpen(true);
+                }}
                 disabled={busy}
                 title="Pick which tracked players feed the cross-sport Scan market"
               >
@@ -672,38 +705,6 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             <button className="btn" onClick={scan} disabled={busy || !types.length || !rarities.length}>
               {running && runMode === "market" ? "scanning…" : "Scan market"}
             </button>
-            {showTools && (
-              <button className="btn otd" onClick={runOtd} disabled={busy} title="Rare→Iconic bulk passes for the fixed wlkr tracked-player list (min discount applies)">
-                {running && runMode === "otd" ? "scanning…" : "wlkr OTD scan"}
-              </button>
-            )}
-            {showTools && (
-              <button className="btn otd" onClick={runActive} disabled={busy} title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (honors the Screen choice)">
-                {running && runMode === "active" ? "scanning…" : "wlkr Active scan"}
-              </button>
-            )}
-            {showTools && (
-              <div className="seg" role="group" aria-label="Active scan card type">
-                <button
-                  type="button"
-                  className={`seg-btn ${activeMode === "bulk" ? "on" : ""}`}
-                  onClick={() => setActiveMode("bulk")}
-                  disabled={busy}
-                  title="Bulk rating passes (rare → iconic)"
-                >
-                  bulk
-                </button>
-                <button
-                  type="button"
-                  className={`seg-btn ${activeMode === "play" ? "on" : ""}`}
-                  onClick={() => setActiveMode("play")}
-                  disabled={busy}
-                  title="Individual play cards (any rarity)"
-                >
-                  play
-                </button>
-              </div>
-            )}
             {running && <span className="muted-note">{sweepMsg}</span>}
           </div>
         </div>
@@ -752,12 +753,12 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
             if (e.target === e.currentTarget) setMenuOpen(false);
           }}
         >
-          <div className="modal" role="dialog" aria-modal="true" aria-label="Tracked players">
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Tools">
             <div className="modal-head">
               <h2 className="modal-title">
-                tracked players<span className="modal-sub"> · wlkr OTD list</span>
+                tools<span className="modal-sub"> · wlkr</span>
               </h2>
-              <span className="muted-note">{checked.length} selected</span>
+              <span className="muted-note">{checked.length} tracked</span>
               <span className="modal-actions">
                 <button className="btn ghost sm" onClick={clearChecked} disabled={!checked.length}>
                   clear
@@ -767,52 +768,125 @@ export default function ShopPanel({ showTools = false }: ShopPanelProps) {
                 </button>
               </span>
             </div>
-            <p className="muted-note modal-hint">
-              Checked players act like they&apos;re in the Specific players box — &quot;Scan
-              market&quot; then runs across every sport/season slice they belong to (no dropdown
-              changes needed). Typed names still only apply to the selected sport/season.
-            </p>
-            <div className="modal-defaults">
-              <button className="btn sm" onClick={applyDefaultSearch} disabled={busy}>
-                Default Player Card Search
+
+            <div className="seg modal-tabs" role="tablist" aria-label="Tools tabs">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={menuTab === "quick"}
+                className={`seg-btn ${menuTab === "quick" ? "on" : ""}`}
+                onClick={() => setMenuTab("quick")}
+              >
+                Quick Searches
               </button>
-              <span className="muted-note">
-                CFB 2026-27 · rating × 15 · play cards · common → epic
-              </span>
-              <button className="btn sm" onClick={applyLowPerRax} disabled={busy}>
-                Low PerRax
+              <button
+                type="button"
+                role="tab"
+                aria-selected={menuTab === "earnings"}
+                className={`seg-btn ${menuTab === "earnings" ? "on" : ""}`}
+                onClick={() => setMenuTab("earnings")}
+              >
+                OTD Earnings
               </button>
-              <span className="muted-note">
-                Low PerRax set · rating × 11 · play cards · common → iconic
-              </span>
             </div>
-            <div className="modal-body">
-              {OTD_MENU.map((g) => (
-                <section key={g.sport} className="menu-sport">
-                  <h3 className="menu-sport-title">{g.label}</h3>
-                  {g.seasons.map((sg) => (
-                    <div key={sg.season} className="menu-season">
-                      <div className="menu-season-label">{sg.label}</div>
-                      <div className="menu-players">
-                        {sg.players.map((p) => {
-                          const on = checked.includes(p.key);
-                          return (
-                            <label key={p.key} className={`menu-player ${on ? "on" : ""}`}>
-                              <input
-                                type="checkbox"
-                                checked={on}
-                                onChange={() => toggleChecked(p.key)}
-                              />
-                              {p.name}
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
+
+            {menuTab === "quick" ? (
+              <>
+                <div className="modal-defaults">
+                  <button className="btn sm" onClick={applyDefaultSearch} disabled={busy}>
+                    CFB-CardSearchDefault
+                  </button>
+                  <span className="muted-note">
+                    CFB 2026-27 · rating × 15 · play cards · common → epic
+                  </span>
+                </div>
+                <div className="modal-defaults">
+                  <button className="btn sm" onClick={applyLowPerRax} disabled={busy}>
+                    Low PerRax
+                  </button>
+                  <span className="muted-note">
+                    Low PerRax set · rating × 11 · play cards · common → iconic
+                  </span>
+                </div>
+                <div className="modal-defaults">
+                  <button
+                    className="btn otd"
+                    onClick={runOtd}
+                    disabled={busy}
+                    title="Rare→Iconic bulk passes for the fixed wlkr tracked-player list (min discount applies)"
+                  >
+                    {running && runMode === "otd" ? "scanning…" : "wlkr OTD scan"}
+                  </button>
+                  <button
+                    className="btn otd"
+                    onClick={runActive}
+                    disabled={busy}
+                    title="Rare→Iconic bulk passes for the wlkr current-season (2026-27) player list (honors the Screen choice)"
+                  >
+                    {running && runMode === "active" ? "scanning…" : "CFB-ActivePlayerScan"}
+                  </button>
+                  <div className="seg" role="group" aria-label="Active scan card type">
+                    <button
+                      type="button"
+                      className={`seg-btn ${activeMode === "bulk" ? "on" : ""}`}
+                      onClick={() => setActiveMode("bulk")}
+                      disabled={busy}
+                      title="Bulk rating passes (rare → iconic)"
+                    >
+                      bulk
+                    </button>
+                    <button
+                      type="button"
+                      className={`seg-btn ${activeMode === "play" ? "on" : ""}`}
+                      onClick={() => setActiveMode("play")}
+                      disabled={busy}
+                      title="Individual play cards (any rarity)"
+                    >
+                      play
+                    </button>
+                  </div>
+                  {running && <span className="muted-note">{sweepMsg}</span>}
+                </div>
+                <p className="muted-note modal-hint">
+                  The two presets flip the filters behind this window; the scans read the
+                  tracked-player list.
+                </p>
+                <div className="modal-body">
+                  <p className="muted-note">
+                    Tracked players behave like names in the Specific players box, so &quot;Scan
+                    market&quot; runs every sport/season slice they belong to — no dropdown
+                    changes needed. Typed names still only apply to the selected sport/season.
+                  </p>
+                  {OTD_MENU.map((g) => (
+                    <section key={g.sport} className="menu-sport">
+                      <h3 className="menu-sport-title">{g.label}</h3>
+                      {g.seasons.map((sg) => (
+                        <div key={sg.season} className="menu-season">
+                          <div className="menu-season-label">{sg.label}</div>
+                          <div className="menu-players">
+                            {sg.players.map((p) => {
+                              const on = checked.includes(p.key);
+                              return (
+                                <label key={p.key} className={`menu-player ${on ? "on" : ""}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={() => toggleChecked(p.key)}
+                                  />
+                                  {p.name}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </section>
                   ))}
-                </section>
-              ))}
-            </div>
+                </div>
+              </>
+            ) : (
+              <div className="modal-body">{earningsTab}</div>
+            )}
           </div>
         </div>
       )}

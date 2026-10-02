@@ -171,14 +171,24 @@ export default function EarningsPanel({ username, seq }: { username: string; seq
       .filter(([d]) => d.startsWith(month))
       .reduce((a, [, v]) => a + v, 0);
   }, [data, month]);
+  // Heat scale is per displayed month, so a month that is entirely ahead (or
+  // entirely behind) still reads at full contrast.
   const monthMax = useMemo(() => {
     if (!data || !month) return 0;
     let m = 0;
     for (const [d, v] of Object.entries(data.calendar)) {
-      if (d <= data.today && d.startsWith(month) && v > m) m = v;
+      if (d.startsWith(month) && v > m) m = v;
     }
     return m;
   }, [data, month]);
+
+  // Real's calendar runs the calendar year, so it reaches past today — the
+  // forward arrow walks to the last month Real actually carries.
+  const lastMonth = useMemo(() => {
+    const keys = Object.keys(data?.calendar ?? {});
+    if (!keys.length) return data?.today.slice(0, 7) ?? null;
+    return keys.sort()[keys.length - 1].slice(0, 7);
+  }, [data]);
 
   if (!seq) {
     return (
@@ -212,7 +222,8 @@ export default function EarningsPanel({ username, seq }: { username: string; seq
           <div className="rax-head">
             <div>
               <p className="rax-label">
-                Rax earned · <strong>{labelOf(data.day)}</strong>
+                {data.day > data.today ? "Upcoming rax" : "Rax earned"} ·{" "}
+                <strong>{labelOf(data.day)}</strong>
                 {data.userName ? ` · @${data.userName}` : ""}
                 {data.detail.headerDisplay ? ` · ${data.detail.headerDisplay}` : ""}
               </p>
@@ -238,6 +249,13 @@ export default function EarningsPanel({ username, seq }: { username: string; seq
                 {String(data.etMinute).padStart(2, "0")} ET) — 5am still shows the day before.
                 {data.detail.isActiveDay === true && " Still settling today."}
               </p>
+              {data.day > data.today && (
+                <p className="rax-note">
+                  Ahead of today — this is Real&apos;s own figure for that day&apos;s slate,
+                  counting only the claimable cards per sport (so it can sit under the sum of
+                  the cards listed below), and it isn&apos;t settled earnings yet.
+                </p>
+              )}
             </div>
             <div className="rax-actions">
               <button className="btn ghost" type="button" onClick={() => setShowCal((v) => !v)}>
@@ -279,7 +297,7 @@ export default function EarningsPanel({ username, seq }: { username: string; seq
                   className="btn ghost"
                   type="button"
                   onClick={() => setMonth(shiftMonth(month, 1))}
-                  disabled={month >= data.day.slice(0, 7)}
+                  disabled={!lastMonth || month >= lastMonth}
                 >
                   ›
                 </button>
@@ -292,22 +310,31 @@ export default function EarningsPanel({ username, seq }: { username: string; seq
                 ))}
                 {cells.map((day, i) => {
                   if (!day) return <span className="cal-cell blank" key={`b${i}`} />;
-                  // Future days carry placeholder values in Real's map — only
-                  // days up to the current eastern day have real earnings.
-                  const v = day <= data.today ? data.calendar[day] ?? 0 : 0;
+                  // Real's map covers the whole year, ahead of today included —
+                  // a day past the current eastern day carries that day's
+                  // pre-claim figure (top N per sport), not a placeholder.
+                  const future = day > data.today;
+                  const known = day in data.calendar;
+                  const v = data.calendar[day] ?? 0;
                   const pct = monthMax > 0 ? v / monthMax : 0;
                   return (
                     <button
                       type="button"
                       key={day}
-                      className={`cal-cell${day === data.day ? " today" : ""}${v ? "" : " zero"}`}
+                      className={`cal-cell${day === data.day ? " today" : ""}${v ? "" : " zero"}${
+                        future ? " future" : ""
+                      }${future && !known ? " nodata" : ""}`}
                       style={v ? { background: `rgba(56, 189, 248, ${0.1 + pct * 0.55})` } : undefined}
-                      title={`${labelOf(day)} · ${v.toLocaleString()} rax`}
+                      title={`${labelOf(day)} · ${known ? `${v.toLocaleString()} rax` : "no data"}${
+                        future ? " · upcoming" : ""
+                      }`}
                       onClick={() => void load(username, day)}
                       disabled={loading}
                     >
                       <span className="cal-dom">{Number(day.slice(8))}</span>
-                      <span className="cal-val">{v ? short(v) : ""}</span>
+                      <span className="cal-val">
+                        {v ? short(v) : future && !known ? "—" : ""}
+                      </span>
                     </button>
                   );
                 })}

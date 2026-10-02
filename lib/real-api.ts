@@ -200,6 +200,30 @@ export async function getTodaysSchedule(sport: Sport): Promise<{
   return { day: l.day ?? "", games: l.games ?? [] };
 }
 
+/** Players dressed for one game. Unlike box scores this is populated *before*
+ * a game starts, which is the only way to know who is on the slate ahead.
+ *
+ * For club games `teamId` is the club. For internationals Real keys the very
+ * same player entity to the national team (Olise → France 1347107), so a club
+ * card is in play on a national-team slate even though its own teamId is a
+ * club — match by player id, not by team. */
+export interface GamePlayer {
+  id: number;
+  teamId: number;
+  position?: string | null;
+  injuryStatus?: string | null;
+}
+
+export async function getGamePlayers(
+  sport: Sport,
+  gameId: number
+): Promise<GamePlayer[]> {
+  const d = await realFetch<{ players?: GamePlayer[] }>(
+    `/games/${gameId}/sport/${realSportKey(sport)}/players`
+  );
+  return d.players ?? [];
+}
+
 /** Per-player box scores for one game — the live stat line Real scores cards
  * from. Note these rows carry `day: null` (the game's own `day` is the truth),
  * and the endpoint is one call per game, so callers should narrow the slate
@@ -403,7 +427,49 @@ export async function fetchPlayerListings(params: {
 
 
 // ── account rax (historical earnings) ─────────────────────────
-// Real's own "Historical Earnings" screen: /cardhistoricalearnings/calendar
+/** Same call, but keyed by the raw API sport key — used by the OTD ledger,
+ * which also sweeps sports this app has no tab for (college basketball is
+ * "ncaam"). */
+export async function getUserPassesByApiSport(
+  userId: string,
+  apiSport: string,
+  season: number
+): Promise<UserPass[]> {
+  const data = await realFetch<{ passes?: UserPass[] }>(
+    `/userpasses/${encodeURIComponent(userId)}/passes?sport=${apiSport}&season=${season}`
+  );
+  return data.passes ?? [];
+}
+
+/** One card's OTD claim calendar: a row per claim date with the amount at the
+ * queried boost level (`atRarityEarnings`; `earnings` is the unboosted base).
+ * Public — it answers for a player the session doesn't own, which is what lets
+ * another account's ledger be rebuilt. */
+export interface OtdRow {
+  day?: string;
+  earnings?: number | null;
+  atRarityEarnings?: number | null;
+}
+
+export async function fetchPlayerOtdRows(
+  apiSport: string,
+  season: number,
+  playerId: number,
+  level?: number | null
+): Promise<OtdRow[]> {
+  const q = new URLSearchParams();
+  if (level) q.set("level", String(level));
+  const p = `/userpassearnings/${apiSport}/season/${season}/entity/player/${playerId}${q.size ? `?${q}` : ""}`;
+  try {
+    const d = await mktFetch<{ earnings?: OtdRow[] }>(p);
+    return d.earnings ?? [];
+  } catch {
+    // A single unreadable card must not sink the whole ledger.
+    return [];
+  }
+}
+
+/** Real's own "Historical Earnings" screen: /cardhistoricalearnings/calendar
 // returns { day → rax earned that day } for the account, and
 // /cardhistoricalearnings?day= returns that day's per-sport, per-card
 // breakdown. Two calls cover the whole feature — no per-card sweep.

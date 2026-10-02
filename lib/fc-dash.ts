@@ -53,7 +53,11 @@ function rarityScore(label?: string | null): number {
 export async function buildFcDashboard(
   passes: UserPass[],
   realSched: { day: string; games: Game[] },
-  isSelf: boolean
+  isSelf: boolean,
+  /** playerId → the game they're dressed for, plus the side they're on (see
+   * getGamePlayers: on an international slate that side is the national
+   * team, not the card's club). */
+  playersInPlay: Map<number, { game: Game; teamId: number }> = new Map()
 ): Promise<FcOutput> {
   const cards: DashboardCard[] = [];
   const candidates: FcOutput["candidates"] = [];
@@ -66,10 +70,14 @@ export async function buildFcDashboard(
   }
 
   for (const pass of passes) {
-    const teamId = pass.entityType === "team" ? pass.entity.id : pass.entity.teamId ?? 0;
-    const game = byTeam.get(teamId);
-    if (!game) continue; // club isn't on today's slate
-    const opponent: Team = game.homeTeamId === teamId ? game.awayTeam : game.homeTeam;
+    const clubId = pass.entityType === "team" ? pass.entity.id : pass.entity.teamId ?? 0;
+    // Player cards resolve by player id first: on an international slate the
+    // game is keyed to national teams, so the card's club is nowhere on it.
+    const dressed = pass.entityType === "player" ? playersInPlay.get(pass.entity.id) : undefined;
+    const game = dressed?.game ?? byTeam.get(clubId);
+    if (!game) continue; // not on today's slate
+    const sideTeamId = dressed?.teamId ?? clubId;
+    const opponent: Team = game.homeTeamId === sideTeamId ? game.awayTeam : game.homeTeam;
 
     if (pass.entityType === "team") {
       cards.push({
