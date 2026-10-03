@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.0
+// @version      0.2.1
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -168,6 +168,7 @@
   const HARVEST = ["real-auth-info", "real-session-token", "real-device-type",
     "real-device-name", "real-device-uuid", "real-version", "real-turnstile-token"];
   const creds = {};
+  const credsAt = {};
 
   function harvest(headers) {
     if (!headers) return;
@@ -179,7 +180,7 @@
     }
     for (const k of HARVEST) {
       for (const hk of Object.keys(h)) {
-        if (hk.toLowerCase() === k && h[hk]) creds[k] = h[hk];
+        if (hk.toLowerCase() === k && h[hk]) { creds[k] = h[hk]; credsAt[k] = Date.now(); }
       }
     }
   }
@@ -219,8 +220,25 @@
 
   async function apiGet(path) {
     const res = await fetch(BASE + path, { headers: apiHeaders(), cache: "no-store" });
-    if (!res.ok) throw new Error(`GET ${path.split("?")[0]} -> ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const err = new Error(`GET ${path.split("?")[0]} -> ${res.status}${body ? `: ${body.slice(0, 140)}` : ""}`);
+      err.status = res.status;
+      throw err;
+    }
     return res.json();
+  }
+
+  /** A 401/403 is a dead session, not a bad player — abort instead of burning
+   * the remaining lookups against a credential Real has already rejected. */
+  function authFail(e, log) {
+    if (e && (e.status === 401 || e.status === 403)) {
+      log(`STOP: Real said ${e.status} — this tab's harvested session is stale.`);
+      log("Hard-refresh realapp.com (so the page re-sends fresh headers), then run again.");
+      S.stop = true;
+      return true;
+    }
+    return false;
   }
 
   async function apiPost(path, body) {
@@ -328,7 +346,7 @@
           if (S.stop) return found;
           let ls = [];
           try { ls = await bucketListings(sport, season, rarity, "card"); }
-          catch (e) { log(`! bucket ${sport} r${rarity}: ${e.message}`); }
+          catch (e) { log(`! bucket ${sport} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
           for (const l of ls) consider(l, sport, season, listingLabel(l), found);
           await sleep(gap());
@@ -340,13 +358,14 @@
         if (S.stop) return found;
         log(`· ${sport} ${season} — ${name}`);
         let pid = null;
-        try { pid = await resolvePlayer(sport, name); } catch (e) { log(`! resolve "${name}": ${e.message}`); }
+        try { pid = await resolvePlayer(sport, name); }
+        catch (e) { log(`! resolve "${name}": ${e.message}`); if (authFail(e, log)) return found; }
         if (pid == null) { log(`! unresolved: ${name}`); await sleep(gap()); continue; }
         for (const rarity of RARITIES) {
           if (S.stop) return found;
           let ls = [];
           try { ls = await playerListings(sport, season, pid, rarity, "card"); }
-          catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); }
+          catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
           for (const l of ls) consider(l, sport, season, name, found);
           await sleep(gap());
@@ -645,12 +664,20 @@
     }
   }
 
+  /** Header age matters: a Turnstile token lives about five minutes, and the
+   * page only re-sends headers when it makes a request. Age = "go refresh". */
+  function cred(k) {
+    if (!creds[k]) return "—";
+    const a = Math.round((Date.now() - credsAt[k]) / 1000);
+    return a > 240 ? `✓ ${Math.round(a / 60)}m old` : "✓";
+  }
+
   function render() {
     if (!panel || !panel.isConnected) return;
     const age = S.lastAt ? Math.round((Date.now() - S.lastAt) / 1000) : null;
     statusEl.textContent =
       `maxRpr ${DEFAULTS.maxRpr} · maxCards ${DEFAULTS.maxCards} · maxSpend ${DEFAULTS.maxSpend} rax\n` +
-      `sent: auth-info ${creds["real-auth-info"] ? "✓" : "—"} · session ${creds["real-session-token"] ? "✓" : "—"} · turnstile ${creds["real-turnstile-token"] ? "✓" : "—"}\n` +
+      `sent: auth-info ${cred("real-auth-info")} · session ${cred("real-session-token")} · turnstile ${cred("real-turnstile-token")}\n` +
       (hashPlan ? "targets: from Walkr's Menu\n" : "") +
       (S.lastPlan ? `cached plan: ${S.lastPlan.length} card(s) · ${S.lastSpend} rax · ${age}s old\n` : "") +
       (DEFAULTS.live ? "MODE: LIVE" : "MODE: dry run");
