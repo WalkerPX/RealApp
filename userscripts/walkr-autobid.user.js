@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.1.1
+// @version      0.1.2
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -22,6 +22,10 @@
   A bid at the listing's buy-now price starts a 10-minute countdown. If nobody
   outbids you in that window, the card is yours. So a "run" is N bids and up to
   N wins — the caps below are what stop that from becoming N × whatever.
+
+  Every listing under the ceiling gets a bid: duplicates, multiple copies of the
+  same player, and low rarities included. Nothing is deduped on purpose — the
+  goal is as many cheap cards of a target player as the market will sell.
 
   SAFETY
   ------
@@ -241,6 +245,9 @@
   };
 
   const RARITIES = [1, 2, 3, 4, 5, 6, 7];
+  const RARITY_LABEL = { 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Mystic", 7: "Iconic" };
+  /** Real reports ratings as float noise (4.799999999999999) — show 2dp. */
+  const fmtR = (n) => (Number.isFinite(n) ? String(Number(n.toFixed(2))) : "—");
 
   /** Find every live listing of the target players that clears the ceiling. */
   async function scan(targets, log) {
@@ -261,7 +268,7 @@
           let ls = [];
           try { ls = await playerListings(sport, season, pid, rarity, "card"); }
           catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); }
-          if (ls.length) log(`  r${rarity}: ${ls.length} listing(s)`);
+          if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
           for (const l of ls) {
             const ends = l.endsAt ? Date.parse(l.endsAt) : NaN;
             if (Number.isFinite(ends) && ends <= Date.now()) continue;
@@ -332,7 +339,7 @@
       const { plan, spend } = buildPlan(candidates);
       if (!plan.length) { logLine("nothing qualified — done."); return; }
       logLine(`PLAN: ${plan.length} bid(s), ${spend} rax total`);
-      for (const p of plan) logLine(`   ${p.player}  r${p.rarity}  ${p.price} rax @ rating ${p.rating}  (${p.rpr} rpr)  #${p.listingId}`);
+      for (const p of plan) logLine(`   ${p.player}  ${RARITY_LABEL[p.rarity]}  ${p.price} rax @ rating ${fmtR(p.rating)}  (${fmtR(p.rpr)} rpr)  #${p.listingId}`);
 
       if (!DEFAULTS.live) { logLine("DRY RUN — nothing bid. Flip to LIVE to execute."); return; }
 
