@@ -81,3 +81,40 @@ Consequence: a buyer has two viable doors, and the second is much safer.
 
 Door 2 is the one to build on.
 
+## walkr-autobid.user.js — the bidder
+
+Bids the buy-now trigger price on listings under a rax-per-rating ceiling.
+Starts in **dry run**.
+
+Two ways in:
+
+- **Walkr's Menu → Autobid → "Bid <lineup>"** — the lineup and the caps ride in
+  the URL hash (`#walkr=<base64url>`), and the panel shows *from Walkr's Menu*.
+- **Standalone** — pick a **Quick Search** (the same lineups), or set
+  **Sport** (including `all`) + **Players**.
+
+Flow: **Run** scans and caches the plan, spending nothing unless LIVE is ticked.
+Then **Bid these N (X rax)** fires *that cached plan* — no second scan. A plan
+older than 5 minutes warns first, because listings turn over.
+
+A bid at the trigger price starts a 10-minute countdown; nobody outbids you and
+the card is yours. Bids are **not** deduped — duplicates, repeat players and low
+rarities are all bid on, on purpose.
+
+Hard caps, enforced in code: **≤11 rax/rating · ≤20 cards · ≤1000 rax per run**.
+STOP halts between every step. A failed bid stops the run, except a listing that
+vanished (sold/expired between scan and bid), which is skipped and reported.
+
+### The preset block is generated
+
+`const PRESETS` is baked in — the userscript runs on realapp.com and can't import
+`lib/`. Regenerate it after a budget sweep:
+
+```
+node scripts/autobid/export_presets.mjs
+```
+
+It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts) and `LOW_PERRAX_SLICES`
+(lib/deals.ts), so the dropdown and Walkr's Menu can't drift apart.
+
+

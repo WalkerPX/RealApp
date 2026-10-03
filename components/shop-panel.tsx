@@ -1055,7 +1055,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                         key={`bid-${p.id}`}
                         type="button"
                         className="btn sm"
-                        onClick={() => openAutobid(p.slices, p.label)}
+                        onClick={() => openAutobid(p.slices, `Optimal Budget · ${p.label}`)}
                         disabled={busy}
                         title={
                           `Opens realapp.com with the ${p.label} lineup loaded into the Walkr ` +
