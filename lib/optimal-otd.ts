@@ -13,6 +13,11 @@
  * local search, lands on the optimum in practice.
  */
 import { OTD_DATA } from "./otd-optimal-data";
+import {
+  OTD_BUDGET_ASOF,
+  OTD_BUDGET_DATA,
+  OTD_BUDGET_META,
+} from "./otd-budget-data";
 import { LEVEL_MULT, RARITY_TIERS, LINEUP_SIZES } from "./otd-levels";
 
 export { LEVEL_MULT, RARITY_TIERS, LINEUP_SIZES };
@@ -61,6 +66,59 @@ export function seasonLabel(sport: string, season: number): string {
     return `${season - 1}-${String(season % 100).padStart(2, "0")}`;
   }
   return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
+}
+
+// ── budget filter ────────────────────────────────────────────
+// "Budget" lines a lineup up with what can actually be bought: a card only
+// qualifies if it has MULTIPLE (>= 2) live marketplace listings at or under
+// `maxRpr` rax per rating point. Prices are a SNAPSHOT (see BUDGET_ASOF) —
+// marketplace listings turn over within hours, so this is a guide, not a
+// guarantee at the moment of purchase.
+type BudgetSport = Record<string, Record<string, [number, (string | number)[]]>>;
+const BUDGET = JSON.parse(OTD_BUDGET_DATA) as Record<string, BudgetSport>;
+
+export const BUDGET_ASOF = OTD_BUDGET_ASOF;
+export const BUDGET_META = OTD_BUDGET_META;
+
+/** Sports whose marketplace depth has been swept. */
+export function budgetSports(): string[] {
+  return Object.keys(BUDGET).filter((s) => BUDGET[s] && Object.keys(BUDGET[s]).length);
+}
+
+/** Cheap listings this exact card has at or under `maxRpr` rax/rating.
+ * Only the cheapest 20 values are stored, which is exact for any threshold:
+ * either the count is under 20 (exact) or it is already >= 2 (all we ask). */
+export function budgetCheapListings(
+  sport: string,
+  season: number,
+  playerId: number,
+  maxRpr: number
+): number {
+  const row = BUDGET[sport]?.[String(season)]?.[String(playerId)];
+  if (!row) return 0;
+  let n = 0;
+  for (const v of row[1]) if (Number(v) <= maxRpr) n++;
+  return n;
+}
+
+/** Total live listings this card had at sweep time. */
+export function budgetListingCount(
+  sport: string,
+  season: number,
+  playerId: number
+): number {
+  return BUDGET[sport]?.[String(season)]?.[String(playerId)]?.[0] ?? 0;
+}
+
+/** A card is budget-eligible when it has at least two cheap listings — one
+ * cheap listing is not enough to actually get the card. */
+export function budgetEligible(
+  sport: string,
+  season: number,
+  playerId: number,
+  maxRpr: number
+): boolean {
+  return budgetCheapListings(sport, season, playerId, maxRpr) >= 2;
 }
 
 /** Flat, solver-friendly view of every card. */
@@ -164,6 +222,10 @@ export interface OtdCardRow {
   claimedDays: number;
   /** Month-days it has any claim at all (i.e. its season's games). */
   seasonDays: number;
+  /** Live listings at or under the budget ceiling (null when budget is off). */
+  budgetListings: number | null;
+  /** Total live listings, whatever the price (null when budget is off). */
+  budgetTotal: number | null;
 }
 
 export interface OtdSolution {
@@ -172,6 +234,14 @@ export interface OtdSolution {
   k: number;
   /** true = k cards for EACH selected sport; false = k cards in total. */
   perSport: boolean;
+  /** Rax-per-rating ceiling when the budget filter is on, else null. */
+  budget: number | null;
+  /** Sports dropped because no marketplace depth has been swept for them. */
+  budgetExcluded: string[];
+  /** Cards that passed the budget filter (0 when the filter is off). */
+  budgetPool: number;
+  /** When the marketplace depth snapshot was taken. */
+  budgetAsof: string | null;
   /** Cards actually selected (k × sports when per-sport). */
   totalCards: number;
   totalBase: number;
@@ -249,12 +319,25 @@ function solvePool(sportList: string[], pool: Card[], k: number): Card[] {
 export function solveOtd(
   sports: string[] | null,
   k: number,
-  perSport = false
+  perSport = false,
+  budget: number | null = null
 ): OtdSolution {
   const cards = allCards();
-  const active = (sports && sports.length ? sports : OTD_SPORTS.map((s) => s.id)).filter(
+  let active = (sports && sports.length ? sports : OTD_SPORTS.map((s) => s.id)).filter(
     (s) => RAW[s]
   );
+
+  // Budget drops any sport whose marketplace depth hasn't been swept — a sport
+  // with no price data can't honour the filter, and silently ignoring it would
+  // put unbuyable cards in a "budget" lineup.
+  let excluded: string[] = [];
+  if (budget != null) {
+    const swept = new Set(budgetSports());
+    excluded = active.filter((s) => !swept.has(s));
+    active = active.filter((s) => swept.has(s));
+  }
+  const eligible = (c: Card) =>
+    budget == null || budgetEligible(c.sport, c.season, c.playerId, budget);
 
   // The objective is separable by sport — each sport keeps its own two claims a
   // day and never competes with another sport for them — so "k cards per sport"
@@ -263,13 +346,16 @@ export function solveOtd(
   if (perSport) {
     set = [];
     for (const s of active) {
-      const sportPool = cards.filter((c) => c.sport === s);
+      const sportPool = cards.filter((c) => c.sport === s && eligible(c));
       set.push(...solvePool([s], sportPool, k));
     }
   } else {
-    const pool = cards.filter((c) => active.includes(c.sport));
+    const pool = cards.filter((c) => active.includes(c.sport) && eligible(c));
     set = solvePool(active, pool, k);
   }
+  const budgetPool = budget == null ? 0 : cards.filter(
+    (c) => active.includes(c.sport) && eligible(c)
+  ).length;
 
   // Accounting: each month-day, the two best cards of each sport claim.
   const byDay: Record<string, number> = {};
@@ -314,6 +400,10 @@ export function solveOtd(
       contribBase: contrib.get(c) ?? 0,
       claimedDays: claimDays.get(c) ?? 0,
       seasonDays: c.seasonDays,
+      budgetListings:
+        budget == null ? null : budgetCheapListings(c.sport, c.season, c.playerId, budget),
+      budgetTotal:
+        budget == null ? null : budgetListingCount(c.sport, c.season, c.playerId),
     }))
     .sort((a, b) => b.contribBase - a.contribBase);
 
@@ -321,6 +411,10 @@ export function solveOtd(
     sports: active,
     k,
     perSport,
+    budget,
+    budgetExcluded: excluded,
+    budgetPool,
+    budgetAsof: budget == null ? null : BUDGET_ASOF,
     totalCards: set.length,
     totalBase: total,
     cards: rows,

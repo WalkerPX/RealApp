@@ -1,14 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { solveOtd, OTD_SPORTS, sportLabel } from "@/lib/optimal-otd";
+import {
+  solveOtd,
+  OTD_SPORTS,
+  sportLabel,
+  budgetSports,
+  BUDGET_ASOF,
+  BUDGET_META,
+} from "@/lib/optimal-otd";
 
 export const dynamic = "force-dynamic";
 /** The solver is pure CPU on a ~1.3k-card table — needs the Node runtime. */
 export const runtime = "nodejs";
 
-/** GET /api/optimal-otd?sports=nhl,ncaam&k=10&mode=total|persport
+/** GET /api/optimal-otd?sports=nhl,ncaam&k=10&mode=total|persport&budget=10
  *  `sports` omitted (or `all`) spans every sport we have calendars for.
  *  `mode=persport` takes k cards for EACH selected sport (k × sports total);
  *  `mode=total` (default) takes k cards across all of them.
+ *  `budget=<rax per rating>` restricts the pool to cards with at least two live
+ *  marketplace listings at or under that rax-per-rating price, and drops any
+ *  sport whose marketplace depth hasn't been swept. Omit it (or `off`) to solve
+ *  the whole pool as before.
  *  Claim amounts come back as BASE rax; multiply by LEVEL_MULT[level] for an
  *  at-level figure (the winning set is identical at every level). */
 export async function GET(req: NextRequest) {
@@ -26,8 +37,15 @@ export async function GET(req: NextRequest) {
   const k = Number.isFinite(kRaw) ? Math.min(20, Math.max(1, Math.round(kRaw))) : 10;
   const perSport = (url.searchParams.get("mode") ?? "total") === "persport";
 
+  const bRaw = (url.searchParams.get("budget") ?? "").trim().toLowerCase();
+  const bNum = Number(bRaw);
+  const budget =
+    !bRaw || bRaw === "off" || bRaw === "0" || !Number.isFinite(bNum)
+      ? null
+      : Math.min(1000, Math.max(1, bNum));
+
   try {
-    const sol = solveOtd(sports, k, perSport);
+    const sol = solveOtd(sports, k, perSport, budget);
     return NextResponse.json({
       ...sol,
       sportsMeta: sol.sports.map((id) => ({
@@ -36,6 +54,9 @@ export async function GET(req: NextRequest) {
         cards: OTD_SPORTS.find((s) => s.id === id)?.cards ?? 0,
       })),
       available: OTD_SPORTS,
+      budgetSwept: budgetSports(),
+      budgetAsof: BUDGET_ASOF,
+      budgetMeta: BUDGET_META,
     });
   } catch (e) {
     return NextResponse.json(
