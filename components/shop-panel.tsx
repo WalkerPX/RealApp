@@ -19,6 +19,7 @@ import {
   type DealListingType,
   type DealMode,
   type DealSport,
+  type WalkerOtdSlice,
 } from "@/lib/deals";
 import {
   BUDGET_SEARCH_CEILING,
@@ -661,14 +662,15 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
    * realapp.com (Real signs marketplace writes with a page-minted Turnstile
    * token, so nothing server-side can bid); it re-scans the lineup live and
    * bids. Everything below is dry-run until LIVE is ticked in its panel. */
-  const openAutobid = (preset: BudgetSearchPreset) => {
+  const openAutobid = (slices: WalkerOtdSlice[], label: string) => {
     const payload = {
-      targets: preset.slices.map((s) => ({
+      targets: slices.map((s) => ({
         sport: s.sport,
         season: s.season,
         players: s.players,
       })),
       ...autobidCaps,
+      label,
     };
     const url = `https://www.realapp.com/#walkr=${toBase64Url(JSON.stringify(payload))}`;
     window.open(url, "_blank", "noopener,noreferrer");
@@ -1035,12 +1037,25 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                 <div className="modal-group">
                   <div className="modal-group-label">Autobid</div>
                   <div className="modal-defaults">
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => openAutobid(LOW_PERRAX_SLICES, "Low PerRax")}
+                      disabled={busy}
+                      title={
+                        `Opens realapp.com with the Low PerRax tracked-player list loaded into ` +
+                        `the Walkr Autobid extension — same players the Low PerRax screen uses, ` +
+                        `bid at ≤${AUTOBID_MAX_RPR} rax/rating. Dry run until you tick LIVE there.`
+                      }
+                    >
+                      Bid Low PerRax
+                    </button>
                     {BUDGET_SEARCH_PRESETS.map((p) => (
                       <button
                         key={`bid-${p.id}`}
                         type="button"
                         className="btn sm"
-                        onClick={() => openAutobid(p)}
+                        onClick={() => openAutobid(p.slices, p.label)}
                         disabled={busy}
                         title={
                           `Opens realapp.com with the ${p.label} lineup loaded into the Walkr ` +

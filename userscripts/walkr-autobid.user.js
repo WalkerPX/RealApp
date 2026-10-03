@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.1.2
+// @version      0.1.3
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -330,7 +330,8 @@
       if (!creds["real-turnstile-token"]) { logLine("STOP: no turnstile token seen yet. Open the marketplace once, then re-run."); return; }
 
       const targets = currentTargets();
-      logLine(`plan: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`);
+      const planLabel = hashPlan && hashPlan.label ? ` (${hashPlan.label})` : "";
+      logLine(`plan${planLabel}: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`);
 
       const candidates = await scan(targets, logLine);
       if (S.stop) { logLine("stopped."); return; }
@@ -340,6 +341,10 @@
       if (!plan.length) { logLine("nothing qualified — done."); return; }
       logLine(`PLAN: ${plan.length} bid(s), ${spend} rax total`);
       for (const p of plan) logLine(`   ${p.player}  ${RARITY_LABEL[p.rarity]}  ${p.price} rax @ rating ${fmtR(p.rating)}  (${fmtR(p.rpr)} rpr)  #${p.listingId}`);
+      const capped = candidates.length > plan.length;
+      logLine(capped
+        ? `— ${candidates.length} cards found | ${plan.length} in plan (caps bit) | ${spend} rax —`
+        : `— ${plan.length} cards found | ${spend} rax total —`);
 
       if (!DEFAULTS.live) { logLine("DRY RUN — nothing bid. Flip to LIVE to execute."); return; }
 
@@ -358,7 +363,9 @@
         logLine(`BID OK #${p.listingId} ${p.player} @ ${p.price} rax · top=${li.isTopBidder} · bids=${li.numBids}`);
         await sleep(gap());
       }
-      logLine("run complete.");
+      const placed = S.bids.filter((b) => b.ok);
+      const committed = placed.reduce((s, b) => s + b.price, 0);
+      logLine(`— ${placed.length} bid(s) placed | ${committed} rax committed | each card lands only if nobody outbids it in 10 min —`);
     } catch (e) {
       logLine(`ERROR: ${e.message}`);
     } finally {
