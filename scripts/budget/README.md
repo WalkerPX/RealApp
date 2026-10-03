@@ -46,10 +46,30 @@ python3 deep_budget.py                          # re-walk the uncertain ones
 
 python3 export_otd_budget.py                    # -> lib/otd-budget-data.ts
 python3 verify_budget.py 5 10                   # cross-check vs the API
+
+python3 export_budget_searches.py 5 10          # -> lib/budget-searches.ts
+python3 verify_budget_searches.py               # every name resolves on Real
+python3 verify_budget_scan.py                   # replay each preset at /api/deals
 cd ../.. && npm run build
 ```
 
-Then commit `lib/otd-budget-data.ts`.
+Then commit `lib/otd-budget-data.ts` and `lib/budget-searches.ts`.
+
+## Search presets (Walkr's Menu)
+
+`export_budget_searches.py` solves the best 5-card lineup per sport at the
+ceiling and emits `lib/budget-searches.ts`, which drives the **Optimal Budget**
+buttons in Walkr's Menu. Clicking one loads that lineup's players, flips the
+filters to the Low PerRax screen (rating × 11, play cards, all rarities), closes
+the window and scans immediately.
+
+The presets read the same data and the same rule as the Optimal OTD panel, so the
+two can't drift — but that also means **re-run the generator after every sweep**,
+or the buttons will quote lineups the panel no longer agrees with.
+
+`All Sports` is 5 per sport across all 7 sports (35 players). CFB is included for
+that to add up, and gets its own button — it would be odd for its players to show
+up only inside All Sports.
 
 ## Speed
 

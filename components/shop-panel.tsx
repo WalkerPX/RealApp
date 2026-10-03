@@ -20,6 +20,12 @@ import {
   type DealMode,
   type DealSport,
 } from "@/lib/deals";
+import {
+  BUDGET_SEARCH_CEILING,
+  BUDGET_SEARCH_FACTOR,
+  BUDGET_SEARCH_PRESETS,
+  type BudgetSearchPreset,
+} from "@/lib/budget-searches";
 
 // Keep in sync with app/globals.css --rarity-*.
 const RARITY_HEX: Record<string, string> = {
@@ -201,7 +207,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
   // and the OTD Earnings ledger.
   const [menuTab, setMenuTab] = useState<"quick" | "earnings">("quick");
   const [running, setRunning] = useState(false);
-  const [runMode, setRunMode] = useState<"market" | "otd" | "active" | null>(null);
+  const [runMode, setRunMode] = useState<"market" | "otd" | "active" | "budget" | null>(null);
   // wlkr Active scan card type: bulk rating passes vs individual play cards.
   const [activeMode, setActiveMode] = useState<"bulk" | "play">("bulk");
   // wlkr Active scan screen: "discount" keeps the FMV min-discount rule;
@@ -385,14 +391,19 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
    * who = summary label when spanning multiple slices ("wlkr tracked set" /
    * "checked players"). Types/rarities are passed per call (the OTD sweep
    * forces bulk + rare→iconic); the screen (discount vs rating ×) is a single
-   * shop-wide choice, so every scan type honors the same one. */
+   * shop-wide choice, so every scan type honors the same one — unless a caller
+   * passes `opts`, which the budget presets use to force their own screen and
+   * factor without waiting for the state update to land. */
   const runSlices = useCallback(
     async (
       slices: RunSlice[],
       listTypes: DealListingType[],
       rar: number[],
-      who: string
+      who: string,
+      opts?: { screen?: DealMode; factor?: number }
     ) => {
+      const scr = opts?.screen ?? screen;
+      const fac = opts?.factor ?? factor;
       if (!slices.length) return;
       setRunning(true);
       setError(null);
@@ -420,9 +431,9 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
             players: s.players.join(", "),
             minDisc: String(minDisc),
             auctions: auctions ? "1" : "0",
-            mode: screen,
+            mode: scr,
           });
-          if (screen === "rating") params.set("factor", String(factor));
+          if (scr === "rating") params.set("factor", String(fac));
           const label = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
           try {
             const res = await fetch(`/api/deals?${params}`);
@@ -579,6 +590,46 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
       setRunMode(null);
     }
   }, [running, runSlices, activeMode]);
+
+  /** Optimal Budget quick searches: load a preset's lineup players, flip the
+   * filters to the Low PerRax screen (rating × 11, play cards, every rarity),
+   * close the tools window and run the scan straight away — no "Done" then
+   * "Scan market" in between.
+   *
+   * The slices are passed in directly rather than through `plan`, because `plan`
+   * is derived from `checked` state that hasn't re-rendered yet — reading it here
+   * would scan the *previous* selection. `checked` is still updated so the
+   * tracked-player list shows what's being searched. */
+  const runBudgetSearch = useCallback(
+    async (preset: BudgetSearchPreset) => {
+      if (running) return;
+      const slices: RunSlice[] = preset.slices.map((s) => ({
+        sport: s.sport,
+        season: s.season,
+        players: s.players,
+      }));
+      const rar = [7, 6, 5, 4, 3, 2, 1];
+      setChecked(
+        slices.flatMap((s) => s.players.map((p) => walkerOtdKey(s.sport, s.season, p)))
+      );
+      setScreen("rating");
+      setFactor(BUDGET_SEARCH_FACTOR);
+      setFactorText(String(BUDGET_SEARCH_FACTOR));
+      setTypes(["card"]);
+      setRarities(rar);
+      setMenuOpen(false);
+      setRunMode("budget");
+      try {
+        await runSlices(slices, ["card"], rar, `budget ${preset.label}`, {
+          screen: "rating",
+          factor: BUDGET_SEARCH_FACTOR,
+        });
+      } finally {
+        setRunMode(null);
+      }
+    },
+    [running, runSlices]
+  );
 
   const busy = running || runMode !== null;
 
@@ -908,9 +959,38 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                     {running && <span className="muted-note">{sweepMsg}</span>}
                   </div>
                 </div>
+                <div className="modal-group">
+                  <div className="modal-group-label">Optimal Budget</div>
+                  <div className="modal-defaults">
+                    {BUDGET_SEARCH_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="btn sm"
+                        onClick={() => void runBudgetSearch(p)}
+                        disabled={busy}
+                        title={
+                          `Best ${p.cards}-card Optimal Budget lineup ` +
+                          `(${p.best.toLocaleString()} base rax/yr) — searches ` +
+                          `${p.cards} player${p.cards === 1 ? "" : "s"} at rating × ` +
+                          `${BUDGET_SEARCH_FACTOR}, play cards, all rarities. Runs on click.`
+                        }
+                      >
+                        {p.cards} Card {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="modal-defaults">
+                    <span className="muted-note">
+                      Lineups solved at ≤{BUDGET_SEARCH_CEILING} rax/rating (≥2 live listings) ·
+                      rating × {BUDGET_SEARCH_FACTOR} · play cards · all rarities. Clicking one
+                      closes this window and scans straight away.
+                    </span>
+                  </div>
+                </div>
                 <p className="muted-note modal-hint">
-                  The two presets flip the filters behind this window; the scans read the players
-                  picked below.
+                  The presets flip the filters behind this window; the scans read the players
+                  picked below. Optimal Budget buttons carry their own lineup instead.
                 </p>
                 <div className="modal-body">
                   {collection ? (
