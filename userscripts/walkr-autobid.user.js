@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.2
+// @version      0.2.3
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -151,7 +151,7 @@
       const f = Math.floor(n.length / 2);
       while (result.length < minLength) {
         n = shuf(n, n);
-        result = result.slice(f).concat(result);
+        result = n.slice(f).concat(result);
         result = result.concat(n.slice(0, f));
         const h = result.length - minLength;
         if (h > 0) { const b = Math.floor(h / 2); result = result.slice(b, b + minLength); }
@@ -159,8 +159,15 @@
       return result.join("");
     };
   }
-  const reqToken = () => buildHashids("realwebapp", 16)([Date.now()]);
+  const reqToken = (ms) => buildHashids("realwebapp", 16)([ms == null ? Date.now() : ms]);
   const listingUrl = (id) => `https://www.realapp.com/${buildHashids("routing", 11)([30, 0, 0, id])}`;
+
+  /** One wrong character in this port makes every request "malformed": Real
+   * answers 401 "Malformed request.", which reads exactly like a dead session.
+   * That happened once and cost an afternoon. This vector comes from the
+   * verified Python port, and the code is checked against it at boot. */
+  const SELF_TEST = { ms: 1791059042041, want: "v0Obkvj9AlZ3vQKW" };
+  const selfTestOk = reqToken(SELF_TEST.ms) === SELF_TEST.want;
 
   // ── credential harvester ─────────────────────────────────────────────────
   // We never mint anything. We watch the page's own traffic and keep the newest
@@ -700,6 +707,10 @@
   function boot() {
     if (!document.body) { setTimeout(boot, 300); return; }
     if (!panel) buildPanel();
+    if (!selfTestOk && !S.log.some((l) => l.includes("SELF-TEST"))) {
+      S.log.unshift("SELF-TEST FAILED — the request-token encoder is wrong, every call will 401 as \"Malformed request\".");
+      render();
+    }
     setInterval(() => { if (panel && !panel.isConnected) mount(panel); }, 2000);
     setInterval(() => { if (panel && panel.isConnected) render(); }, 1000);
   }
