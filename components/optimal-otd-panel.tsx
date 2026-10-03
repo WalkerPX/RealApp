@@ -251,7 +251,7 @@ export default function OptimalOtdPanel() {
                 setDay(null);
               }}
             />
-            <span>Only cards I can buy</span>
+            <span>Enable Budget Only</span>
           </label>
           {budgetOn && (
             <>
