@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         Walkr Buy Capture
 // @namespace    walkr.realapp
-// @version      0.1.0
+// @version      0.1.1
 // @description  Records Real's marketplace WRITE requests (Buy Now / bid) so the exact flow can be learned. Captures only — never sends anything, never buys anything.
 // @author       walkr
-// @match        https://www.realapp.com/*
-// @match        https://realapp.com/*
-// @match        https://web.realapp.com/*
+// @match        *://*.realapp.com/*
+// @match        *://realapp.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -42,6 +41,11 @@
   const W = window;
   if (W.__walkrBuyCaptureLoaded) return;
   W.__walkrBuyCaptureLoaded = true;
+
+  const TAG = "[walkr-buy-capture]";
+  const log = (...a) => { try { console.log(TAG, ...a); } catch (_) {} };
+  const warn = (...a) => { try { console.warn(TAG, ...a); } catch (_) {} };
+  log("script started on", location.href);
 
   const ARM_MS = 90_000;
   const MAX_BODY = 120_000;
@@ -271,8 +275,22 @@
     listEl.style.cssText = "overflow:auto;padding:6px 10px 10px;border-top:1px solid #2a3a55";
 
     panel.append(head, bar, statusEl, listEl);
-    document.documentElement.appendChild(panel);
+    mount(panel);
     makeDraggable(panel, head);
+    log("panel built");
+  }
+
+  function mount(el) {
+    const host = document.body || document.documentElement;
+    if (!host) { warn("no DOM host to mount into yet"); return false; }
+    if (host === document.documentElement && !document.body) {
+      // documentElement is the <html> element; appending there is legal but the
+      // SPA may replace children. Prefer <body> the moment it exists.
+      host.appendChild(el);
+      return true;
+    }
+    host.appendChild(el);
+    return true;
   }
 
   function mkBtn(label, fn) {
@@ -360,14 +378,18 @@
   }
 
   function boot() {
+    log("boot; readyState=" + document.readyState + " body=" + !!document.body);
     ensurePanel();
     setInterval(() => { if (S.on) render(); }, 1000);
     setInterval(ensurePanel, 1500);
   }
+
+  log("hooks installed: fetch=" + (typeof W.fetch === "function") + " xhr=" + !!W.XMLHttpRequest);
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot);
   } else {
     boot();
   }
+  W.addEventListener("load", boot);
 })();
