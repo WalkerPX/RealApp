@@ -35,7 +35,7 @@ import {
 // a lineup and the caps. These three numbers are those caps, and they ride in
 // the URL so the two can never disagree.
 const AUTOBID_MAX_RPR = 11;
-const AUTOBID_MAX_CARDS = 20;
+const AUTOBID_MAX_CARDS = 40;
 const AUTOBID_MAX_SPEND = 1000;
 
 /** UTF-8 safe base64url — the hash has to survive player names like "C.J.". */

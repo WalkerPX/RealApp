@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.4
+// @version      0.2.5
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -56,7 +56,7 @@
   // ── config ────────────────────────────────────────────────────────────────
   const DEFAULTS = {
     maxRpr: 11,          // rax per rating point ceiling, per card
-    maxCards: 20,        // hard ceiling on bids in one run
+    maxCards: 40,        // hard ceiling on bids in one run
     maxSpend: 1000,      // hard ceiling on total rax in one run
     gapMin: 600,         // jittered politeness floor
     gapMax: 1400,
