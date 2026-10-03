@@ -27,6 +27,24 @@ import {
   type BudgetSearchPreset,
 } from "@/lib/budget-searches";
 
+// ── Autobid ──────────────────────────────────────────────────────────────────
+// The bidder is a userscript on realapp.com (see userscripts/walkr-autobid).
+// Real signs every marketplace write with a Turnstile token minted by the page,
+// so nothing server-side can bid — the menu's job is only to hand the extension
+// a lineup and the caps. These three numbers are those caps, and they ride in
+// the URL so the two can never disagree.
+const AUTOBID_MAX_RPR = 11;
+const AUTOBID_MAX_CARDS = 20;
+const AUTOBID_MAX_SPEND = 1000;
+
+/** UTF-8 safe base64url — the hash has to survive player names like "C.J.". */
+function toBase64Url(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 // Keep in sync with app/globals.css --rarity-*.
 const RARITY_HEX: Record<string, string> = {
   iconic: "#f472b6",
@@ -631,6 +649,32 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
     [running, runSlices]
   );
 
+  /** Autobid caps — the hard ceilings the userscript enforces. They ride in the
+   * URL so the menu and the extension can never disagree about them. */
+  const autobidCaps = {
+    maxRpr: AUTOBID_MAX_RPR,
+    maxCards: AUTOBID_MAX_CARDS,
+    maxSpend: AUTOBID_MAX_SPEND,
+  };
+
+  /** Hand the browser extension a lineup to bid on. The extension lives on
+   * realapp.com (Real signs marketplace writes with a page-minted Turnstile
+   * token, so nothing server-side can bid); it re-scans the lineup live and
+   * bids. Everything below is dry-run until LIVE is ticked in its panel. */
+  const openAutobid = (preset: BudgetSearchPreset) => {
+    const payload = {
+      targets: preset.slices.map((s) => ({
+        sport: s.sport,
+        season: s.season,
+        players: s.players,
+      })),
+      ...autobidCaps,
+    };
+    const url = `https://www.realapp.com/#walkr=${toBase64Url(JSON.stringify(payload))}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMenuOpen(false);
+  };
+
   const busy = running || runMode !== null;
 
   return (
@@ -985,6 +1029,36 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                       Lineups solved at ≤{BUDGET_SEARCH_CEILING} rax/rating (≥2 live listings) ·
                       rating × {BUDGET_SEARCH_FACTOR} · play cards · all rarities. Clicking one
                       closes this window and scans straight away.
+                    </span>
+                  </div>
+                </div>
+                <div className="modal-group">
+                  <div className="modal-group-label">Autobid</div>
+                  <div className="modal-defaults">
+                    {BUDGET_SEARCH_PRESETS.map((p) => (
+                      <button
+                        key={`bid-${p.id}`}
+                        type="button"
+                        className="btn sm"
+                        onClick={() => openAutobid(p)}
+                        disabled={busy}
+                        title={
+                          `Opens realapp.com with the ${p.label} lineup loaded into the Walkr ` +
+                          `Autobid extension. It re-scans live and bids any listing at ` +
+                          `≤${AUTOBID_MAX_RPR} rax/rating, up to ${AUTOBID_MAX_CARDS} cards and ` +
+                          `${AUTOBID_MAX_SPEND} rax per run. Dry run until you tick LIVE there.`
+                        }
+                      >
+                        Bid {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="modal-defaults">
+                    <span className="muted-note">
+                      Needs the Walkr Autobid userscript installed. It bids the buy-now trigger
+                      price, which starts a 10-minute countdown — you keep the card only if nobody
+                      outbids you. Caps: ≤{AUTOBID_MAX_RPR} rax/rating · ≤{AUTOBID_MAX_CARDS} cards
+                      · ≤{AUTOBID_MAX_SPEND} rax per run.
                     </span>
                   </div>
                 </div>
