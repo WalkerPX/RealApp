@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.1.0
+// @version      0.1.1
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -251,14 +251,17 @@
       const season = t.season || SEASON[sport];
       for (const name of t.players) {
         if (S.stop) return found;
+        log(`· ${sport} ${season} — ${name}`);
         let pid = null;
         try { pid = await resolvePlayer(sport, name); } catch (e) { log(`! resolve "${name}": ${e.message}`); }
         if (pid == null) { log(`! unresolved: ${name}`); await sleep(gap()); continue; }
+        log(`  resolved → player ${pid}`);
         for (const rarity of RARITIES) {
           if (S.stop) return found;
           let ls = [];
           try { ls = await playerListings(sport, season, pid, rarity, "card"); }
           catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); }
+          if (ls.length) log(`  r${rarity}: ${ls.length} listing(s)`);
           for (const l of ls) {
             const ends = l.endsAt ? Date.parse(l.endsAt) : NaN;
             if (Number.isFinite(ends) && ends <= Date.now()) continue;
