@@ -117,4 +117,22 @@ node scripts/autobid/export_presets.mjs
 It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts) and `LOW_PERRAX_SLICES`
 (lib/deals.ts), so the dropdown and Walkr's Menu can't drift apart.
 
+### The 401 that wasn't an auth problem
+
+Real answers **401 "Malformed request."** for a bad `real-request-token` — the
+same status and nearly the same wording as a dead session, which is why a broken
+hashids port reads as "your session expired". Diagnostic map, verified live:
+
+| response | actually means |
+|---|---|
+| `401 Malformed request.` | `real-request-token` missing or garbage |
+| `401 Invalid request.` | token well-formed but stale (hour-old) |
+| `401 Authentication required.` | bad `real-auth-info` |
+| `400 Real cannot be used on this device` | missing `real-device-uuid` |
+
+So the userscript now checks its encoder against a known vector at boot and
+prints `SELF-TEST FAILED` if it drifts. A one-character typo in the hashids port
+shipped once and cost an afternoon; that is what the check is for.
+
+
 
