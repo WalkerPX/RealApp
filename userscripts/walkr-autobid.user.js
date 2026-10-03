@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.3
+// @version      0.2.4
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -267,6 +267,17 @@
   // ── scanning ─────────────────────────────────────────────────────────────
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const gap = () => DEFAULTS.gapMin + Math.floor(Math.random() * (DEFAULTS.gapMax - DEFAULTS.gapMin + 1));
+
+  /** Gap between bids. Deliberately not a metronome: a person's cadence drifts,
+   * sometimes fires a quick pair, sometimes gets distracted for a few seconds.
+   * Weighted so the average stays ~1.6s — quick, but not uniform. Independent of
+   * the read `gap()` so a bid burst and a scan burst don't share a rhythm. */
+  function bidGap() {
+    const r = Math.random();
+    if (r < 0.05) return 350 + Math.floor(Math.random() * 300);    // quick pair
+    if (r < 0.15) return 2800 + Math.floor(Math.random() * 4200);  // glanced away
+    return 700 + Math.floor(Math.random() * 1300);                 // normal
+  }
   const nameKey = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 
   async function resolvePlayer(sport, name) {
@@ -433,7 +444,8 @@
       log(`WARNING: the Turnstile token is ${Math.round(tokAge / 60)} min old and lives about 5 — refresh realapp.com first, or Real will reject the bids.`);
     }
     let placed = 0, committed = 0, skipped = 0;
-    log(`LIVE — bidding ${plan.length}`);
+    log(`LIVE — bidding ${plan.length} · ~1.6s apart with the odd longer pause`);
+    await sleep(700 + Math.floor(Math.random() * 1200));   // a beat before the first bid
     for (const p of plan) {
       if (S.stop) { log("STOPPED mid-run."); break; }
       const r = await apiPost(`/cardmarketplacelistings/${p.listingId}/bid`, { bidAmount: p.price });
@@ -452,7 +464,7 @@
         break;
       }
       S.bids.push({ ...p, ok, status: r.status });
-      await sleep(gap());
+      await sleep(bidGap());
     }
     log(`— ${placed} bid(s) placed | ${committed} rax committed | ${skipped} skipped | each card lands only if nobody outbids it in 10 min —`);
   }
