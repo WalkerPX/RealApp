@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.1
+// @version      0.2.2
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -206,7 +206,10 @@
   // ── api ──────────────────────────────────────────────────────────────────
   const BASE = "https://web.realapp.com";
 
-  function apiHeaders() {
+  /** Real's reads carry the device/auth headers but NOT a Turnstile token — its
+   * own web app attaches one only to writes. Attaching a stale token to a GET is
+   * exactly what earns a 401, so reads go without it and writes go with it. */
+  function apiHeaders(withTurnstile) {
     const h = {
       "Content-Type": "application/json",
       Accept: "application/json, text/plain, */*",
@@ -214,12 +217,15 @@
       Referer: "https://realapp.com/",
       "real-request-token": reqToken(),
     };
-    for (const k of HARVEST) if (creds[k]) h[k] = creds[k];
+    for (const k of HARVEST) {
+      if (k === "real-turnstile-token" && !withTurnstile) continue;
+      if (creds[k]) h[k] = creds[k];
+    }
     return h;
   }
 
   async function apiGet(path) {
-    const res = await fetch(BASE + path, { headers: apiHeaders(), cache: "no-store" });
+    const res = await fetch(BASE + path, { headers: apiHeaders(false), cache: "no-store" });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       const err = new Error(`GET ${path.split("?")[0]} -> ${res.status}${body ? `: ${body.slice(0, 140)}` : ""}`);
@@ -243,7 +249,7 @@
 
   async function apiPost(path, body) {
     const res = await fetch(BASE + path, {
-      method: "POST", headers: apiHeaders(), body: JSON.stringify(body), cache: "no-store",
+      method: "POST", headers: apiHeaders(true), body: JSON.stringify(body), cache: "no-store",
     });
     const text = await res.text().catch(() => "");
     let data = null;
@@ -413,6 +419,11 @@
     const ages = Date.now() - S.lastAt;
     if (S.lastAt && ages > DEFAULTS.planTtlMs) {
       log(`note: this plan is ${Math.round(ages / 60000)} min old — listings turn over, expect skips`);
+    }
+    const tokAge = credsAt["real-turnstile-token"]
+      ? (Date.now() - credsAt["real-turnstile-token"]) / 1000 : Infinity;
+    if (tokAge > 240) {
+      log(`WARNING: the Turnstile token is ${Math.round(tokAge / 60)} min old and lives about 5 — refresh realapp.com first, or Real will reject the bids.`);
     }
     let placed = 0, committed = 0, skipped = 0;
     log(`LIVE — bidding ${plan.length}`);
