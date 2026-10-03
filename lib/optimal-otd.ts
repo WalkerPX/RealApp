@@ -168,7 +168,12 @@ export interface OtdCardRow {
 
 export interface OtdSolution {
   sports: string[];
+  /** Requested lineup size — per sport when `perSport` is set. */
   k: number;
+  /** true = k cards for EACH selected sport; false = k cards in total. */
+  perSport: boolean;
+  /** Cards actually selected (k × sports when per-sport). */
+  totalCards: number;
   totalBase: number;
   cards: OtdCardRow[];
   /** month-day -> that day's total base rax from the lineup. */
@@ -177,16 +182,13 @@ export interface OtdSolution {
   dayClaims: Record<string, OtdClaim[]>;
 }
 
-export function solveOtd(sports: string[] | null, k: number): OtdSolution {
-  const cards = allCards();
-  const active = (sports && sports.length ? sports : OTD_SPORTS.map((s) => s.id)).filter(
-    (s) => RAW[s]
-  );
-  const pool = cards.filter((c) => active.includes(c.sport));
-
+/** Greedy + swap local search over one pool. `sportList` is the set of sports
+ * the objective sums over — the whole selection in total mode, a single sport
+ * when solving per sport. */
+function solvePool(sportList: string[], pool: Card[], k: number): Card[] {
   const set: Card[] = [];
   for (let step = 0; step < k && set.length < pool.length; step++) {
-    const t2 = seconds(active, set);
+    const t2 = seconds(sportList, set);
     let bestGain = 0;
     let bestCard: Card | null = null;
     for (const c of pool) {
@@ -206,12 +208,12 @@ export function solveOtd(sports: string[] | null, k: number): OtdSolution {
     set.push(bestCard);
   }
 
-  let current = objective(active, set);
+  let current = objective(sportList, set);
   for (let pass = 0; pass < 40; pass++) {
     let improved = false;
     for (let r = 0; r < set.length; r++) {
       const rest = set.filter((_, i) => i !== r);
-      const t2 = seconds(active, rest);
+      const t2 = seconds(sportList, rest);
       let bestGain = 0;
       let bestCard: Card | null = null;
       for (const c of pool) {
@@ -229,7 +231,7 @@ export function solveOtd(sports: string[] | null, k: number): OtdSolution {
       }
       if (bestCard) {
         const cand = [...rest, bestCard];
-        const val = objective(active, cand);
+        const val = objective(sportList, cand);
         if (val > current) {
           set.length = 0;
           set.push(...cand);
@@ -240,6 +242,33 @@ export function solveOtd(sports: string[] | null, k: number): OtdSolution {
       }
     }
     if (!improved) break;
+  }
+  return set;
+}
+
+export function solveOtd(
+  sports: string[] | null,
+  k: number,
+  perSport = false
+): OtdSolution {
+  const cards = allCards();
+  const active = (sports && sports.length ? sports : OTD_SPORTS.map((s) => s.id)).filter(
+    (s) => RAW[s]
+  );
+
+  // The objective is separable by sport — each sport keeps its own two claims a
+  // day and never competes with another sport for them — so "k cards per sport"
+  // is exactly k independent single-sport solves. No interaction to trade off.
+  let set: Card[];
+  if (perSport) {
+    set = [];
+    for (const s of active) {
+      const sportPool = cards.filter((c) => c.sport === s);
+      set.push(...solvePool([s], sportPool, k));
+    }
+  } else {
+    const pool = cards.filter((c) => active.includes(c.sport));
+    set = solvePool(active, pool, k);
   }
 
   // Accounting: each month-day, the two best cards of each sport claim.
@@ -288,5 +317,14 @@ export function solveOtd(sports: string[] | null, k: number): OtdSolution {
     }))
     .sort((a, b) => b.contribBase - a.contribBase);
 
-  return { sports: active, k: set.length, totalBase: total, cards: rows, byDay, dayClaims };
+  return {
+    sports: active,
+    k,
+    perSport,
+    totalCards: set.length,
+    totalBase: total,
+    cards: rows,
+    byDay,
+    dayClaims,
+  };
 }

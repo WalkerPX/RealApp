@@ -56,6 +56,9 @@ interface Available {
 export default function OptimalOtdPanel() {
   const [sports, setSports] = useState<string[] | null>(null); // null = all
   const [k, setK] = useState(10);
+  /** false = k cards in total across the selected sports;
+   *  true  = k cards for EACH selected sport. */
+  const [perSportMode, setPerSportMode] = useState(false);
   const [level, setLevel] = useState(5);
   const [sol, setSol] = useState<OtdSolution | null>(null);
   const [available, setAvailable] = useState<Available[]>([]);
@@ -72,7 +75,8 @@ export default function OptimalOtdPanel() {
     setError(null);
     try {
       const res = await fetch(
-        `/api/optimal-otd?sports=${encodeURIComponent(sportsKey)}&k=${k}`
+        `/api/optimal-otd?sports=${encodeURIComponent(sportsKey)}&k=${k}` +
+          `&mode=${perSportMode ? "persport" : "total"}`
       );
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
@@ -84,7 +88,7 @@ export default function OptimalOtdPanel() {
     } finally {
       setLoading(false);
     }
-  }, [sportsKey, k]);
+  }, [sportsKey, k, perSportMode]);
 
   useEffect(() => {
     void load();
@@ -155,14 +159,36 @@ export default function OptimalOtdPanel() {
 
       <div className="ootd-body">
         <aside className="ootd-rail">
-          <div className="ootd-rail-label">Lineup</div>
+          <div className="ootd-rail-label">Total cards — All sports</div>
           <div className="ootd-rail-btns">
             {LINEUP_SIZES.map((n) => (
               <button
                 key={n}
                 type="button"
-                className={`btn ghost sm ${k === n ? "on" : ""}`}
-                onClick={() => setK(n)}
+                className={`btn ghost sm ${!perSportMode && k === n ? "on" : ""}`}
+                onClick={() => {
+                  setPerSportMode(false);
+                  setK(n);
+                }}
+                title={`${n} cards in total across the selected sports`}
+              >
+                {n} Card
+              </button>
+            ))}
+          </div>
+
+          <div className="ootd-rail-label">Total cards — Per sport</div>
+          <div className="ootd-rail-btns">
+            {LINEUP_SIZES.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`btn ghost sm ${perSportMode && k === n ? "on" : ""}`}
+                onClick={() => {
+                  setPerSportMode(true);
+                  setK(n);
+                }}
+                title={`${n} cards for each selected sport`}
               >
                 {n} Card
               </button>
@@ -199,7 +225,14 @@ export default function OptimalOtdPanel() {
             <>
               <div className="ootd-sum">
                 <p className="ootd-sum-line">
-                  Best <strong>{sol.k}-card</strong> lineup ·{" "}
+                  {sol.perSport ? (
+                    <>
+                      Best <strong>{sol.k}</strong> per sport —{" "}
+                      <strong>{sol.totalCards}</strong> cards ·{" "}
+                    </>
+                  ) : (
+                    <>Best <strong>{sol.k}-card</strong> lineup ·{" "}</>
+                  )}
                   {sports === null
                     ? `all ${sol.sports.length} sports`
                     : sol.sports.map((s) => available.find((a) => a.id === s)?.label ?? s).join(" + ")}
