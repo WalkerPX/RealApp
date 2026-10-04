@@ -101,7 +101,7 @@ A bid at the trigger price starts a 10-minute countdown; nobody outbids you and
 the card is yours. Bids are **not** deduped — duplicates, repeat players and low
 rarities are all bid on, on purpose.
 
-Hard caps, enforced in code: **≤11 rax/rating · ≤40 cards · ≤1000 rax per run**.
+Hard caps, enforced in code: **≤11 rax/rating · ≤50 cards · ≤1000 rax per run**.
 STOP halts between every step. A failed bid stops the run — except the two
 ordinary auction losses: the listing vanished, or somebody bid a moment first and
 the floor moved above the price we were going to pay. Those skip, log what Real

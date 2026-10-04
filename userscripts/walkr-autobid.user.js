@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.7
+// @version      0.2.8
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -58,7 +58,7 @@
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
    * — so the shipped values are kept here to compare against. */
-  const SCRIPT_CAPS = { maxRpr: 11, maxCards: 40, maxSpend: 1000 };
+  const SCRIPT_CAPS = { maxRpr: 11, maxCards: 50, maxSpend: 1000 };
 
   const DEFAULTS = {
     maxRpr: SCRIPT_CAPS.maxRpr,      // rax per rating point ceiling, per card
