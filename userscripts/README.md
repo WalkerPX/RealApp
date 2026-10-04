@@ -102,8 +102,15 @@ the card is yours. Bids are **not** deduped — duplicates, repeat players and l
 rarities are all bid on, on purpose.
 
 Hard caps, enforced in code: **≤11 rax/rating · ≤40 cards · ≤1000 rax per run**.
-STOP halts between every step. A failed bid stops the run, except a listing that
-vanished (sold/expired between scan and bid), which is skipped and reported.
+STOP halts between every step. A failed bid stops the run — except the two
+ordinary auction losses: the listing vanished, or somebody bid a moment first and
+the floor moved above the price we were going to pay. Those skip, log what Real
+said, and the run continues.
+
+The caps can come from two places, and the log now names which: **from the
+panel** (this script's `SCRIPT_CAPS`) or **from Walkr's Menu** (the URL hash). A
+menu page built before a cap change sends the old number, so the script compares
+the two and says so rather than letting it look like the cap failed to update.
 
 ### The preset block is generated
 

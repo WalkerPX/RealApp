@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.5
+// @version      0.2.6
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -44,8 +44,9 @@
     * starts in DRY RUN: Run prints what it would bid and stops
     * three hard caps, enforced in code, not in the UI: rpr / cards / total rax
     * STOP halts immediately, between every single step
-    * a failed bid stops the run — except a listing that vanished, which is
-      skipped and reported (listings sell and expire between scan and bid)
+    * a failed bid stops the run — except the two ordinary auction losses: the
+      listing vanished, or somebody bid a moment first and the floor moved above
+      the price we were going to pay. Those skip, get logged, and the run goes on
 
   A winning bid is a purchase. It cannot be undone.
 */
@@ -54,10 +55,15 @@
   "use strict";
 
   // ── config ────────────────────────────────────────────────────────────────
+  /** This script's own caps. A Walkr's Menu handoff can override them via the
+   * URL, and a menu built before a cap change would quietly send the old number
+   * — so the shipped values are kept here to compare against. */
+  const SCRIPT_CAPS = { maxRpr: 11, maxCards: 40, maxSpend: 1000 };
+
   const DEFAULTS = {
-    maxRpr: 11,          // rax per rating point ceiling, per card
-    maxCards: 40,        // hard ceiling on bids in one run
-    maxSpend: 1000,      // hard ceiling on total rax in one run
+    maxRpr: SCRIPT_CAPS.maxRpr,      // rax per rating point ceiling, per card
+    maxCards: SCRIPT_CAPS.maxCards,  // hard ceiling on bids in one run
+    maxSpend: SCRIPT_CAPS.maxSpend,  // hard ceiling on total rax in one run
     gapMin: 600,         // jittered politeness floor
     gapMax: 1400,
     live: false,         // DRY RUN until you explicitly arm it
@@ -425,13 +431,21 @@
     render();
   }
 
-  /** A listing that sold or expired between scan and bid is expected, not a
-   * failure — skip it and keep going. Anything else stops the run. */
-  function looksGone(r) {
+  /** Outcomes that are NOT failures: the listing died between scan and bid, or
+   * someone bid a moment before us and the floor moved out from under the price
+   * we were going to pay. Both are ordinary on a live auction — skip that card
+   * and keep going rather than aborting the whole run. */
+  function skippable(r) {
     if (r.status === 404 || r.status === 409 || r.status === 410) return true;
     const t = `${r.text || ""} ${JSON.stringify(r.data || {})}`.toLowerCase();
-    return /(no longer|not found|has ended|ended|sold|unavailable|expired|closed|removed)/.test(t);
+    return /(no longer|not found|has ended|ended|sold|unavailable|expired|closed|removed|minimum bid|min bid|minimum price|must be at least|too low|too small|higher than|outbid|already|cannot bid|can not bid|not enough|insufficient)/.test(t);
   }
+
+  /** Whatever Real said, in one line, for the log. */
+  const respMsg = (r) => {
+    const d = r.data || {};
+    return String(d.message || d.error || (r.text || "").trim() || `HTTP ${r.status}`).slice(0, 120);
+  };
 
   async function executePlan(plan, log) {
     const ages = Date.now() - S.lastAt;
@@ -455,9 +469,9 @@
         committed += p.price;
         const li = (r.data && r.data.listingInfo) || {};
         log(`BID OK #${p.listingId} ${p.player} @ ${p.price} rax · top=${li.isTopBidder} · bids=${li.numBids}`);
-      } else if (looksGone(r)) {
+      } else if (skippable(r)) {
         skipped++;
-        log(`skip #${p.listingId} ${p.player} — gone (${r.status})`);
+        log(`skip #${p.listingId} ${p.player} — ${respMsg(r)}`);
       } else {
         log(`FAIL #${p.listingId} (${p.player}) -> ${r.status} ${(r.text || "").slice(0, 140)}`);
         log("stopping on first real failure — nothing further bid.");
@@ -484,7 +498,23 @@
       const targets = currentTargets();
       if (!targets.length) { logLine("STOP: nothing to search — pick a Quick Search or type players."); return; }
       const label = currentLabel();
-      logLine(`plan${label ? ` (${label})` : ""}: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`);
+      logLine(
+        `plan${label ? ` (${label})` : ""}: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax` +
+        (hashPlan ? " · caps from Walkr's Menu" : " · caps from the panel")
+      );
+      // A menu built before a cap change hands over the old numbers, which reads
+      // as "the cap didn't update". Say so instead of letting it look like a bug.
+      if (hashPlan) {
+        const drift = [];
+        if (hashPlan.maxCards != null && Number(hashPlan.maxCards) !== SCRIPT_CAPS.maxCards)
+          drift.push(`cards ${hashPlan.maxCards} vs ${SCRIPT_CAPS.maxCards}`);
+        if (hashPlan.maxSpend != null && Number(hashPlan.maxSpend) !== SCRIPT_CAPS.maxSpend)
+          drift.push(`spend ${hashPlan.maxSpend} vs ${SCRIPT_CAPS.maxSpend}`);
+        if (hashPlan.maxRpr != null && Number(hashPlan.maxRpr) !== SCRIPT_CAPS.maxRpr)
+          drift.push(`rpr ${hashPlan.maxRpr} vs ${SCRIPT_CAPS.maxRpr}`);
+        if (drift.length)
+          logLine(`note: Walkr's Menu sent different caps (${drift.join(", ")}) — that page is an older build. Hard-refresh the site and relaunch.`);
+      }
 
       const candidates = await scan(targets, logLine);
       if (S.stop) { logLine("stopped."); return; }
