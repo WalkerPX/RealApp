@@ -27,6 +27,12 @@ import {
   BUDGET_SEARCH_PRESETS,
   type BudgetSearchPreset,
 } from "@/lib/budget-searches";
+import {
+  DAILY_PACK_FACTOR,
+  DAILY_PACK_PRESETS,
+  PACK_RAX_PER_RATING,
+  type DailyPackPreset,
+} from "@/lib/daily-pack-searches";
 
 // ── Autobid ──────────────────────────────────────────────────────────────────
 // The bidder is a userscript on realapp.com (see userscripts/walkr-autobid).
@@ -226,7 +232,9 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
   // and the OTD Earnings ledger.
   const [menuTab, setMenuTab] = useState<"quick" | "earnings">("quick");
   const [running, setRunning] = useState(false);
-  const [runMode, setRunMode] = useState<"market" | "otd" | "active" | "budget" | null>(null);
+  const [runMode, setRunMode] = useState<
+    "market" | "otd" | "active" | "budget" | "daily pack" | null
+  >(null);
   // wlkr Active scan card type: bulk rating passes vs individual play cards.
   const [activeMode, setActiveMode] = useState<"bulk" | "play">("bulk");
   // wlkr Active scan screen: "discount" keeps the FMV min-discount rule;
@@ -610,17 +618,21 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
     }
   }, [running, runSlices, activeMode]);
 
-  /** Optimal Budget quick searches: load a preset's lineup players, flip the
-   * filters to the Low PerRax screen (rating × 11, play cards, every rarity),
+  /** Preset quick searches: load a preset's lineup players, flip the filters to
+   * the Low PerRax-style screen (rating × `factor`, play cards, every rarity),
    * close the tools window and run the scan straight away — no "Done" then
-   * "Scan market" in between.
+   * "Scan market" in between. `tag` only labels the run in the monitor.
    *
    * The slices are passed in directly rather than through `plan`, because `plan`
    * is derived from `checked` state that hasn't re-rendered yet — reading it here
    * would scan the *previous* selection. `checked` is still updated so the
    * tracked-player list shows what's being searched. */
-  const runBudgetSearch = useCallback(
-    async (preset: BudgetSearchPreset) => {
+  const runPresetSearch = useCallback(
+    async (
+      preset: { label: string; slices: WalkerOtdSlice[] },
+      factor: number,
+      tag: "budget" | "daily pack"
+    ) => {
       if (running) return;
       const slices: RunSlice[] = preset.slices.map((s) => ({
         sport: s.sport,
@@ -632,22 +644,36 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
         slices.flatMap((s) => s.players.map((p) => walkerOtdKey(s.sport, s.season, p)))
       );
       setScreen("rating");
-      setFactor(BUDGET_SEARCH_FACTOR);
-      setFactorText(String(BUDGET_SEARCH_FACTOR));
+      setFactor(factor);
+      setFactorText(String(factor));
       setTypes(["card"]);
       setRarities(rar);
       setMenuOpen(false);
-      setRunMode("budget");
+      setRunMode(tag);
       try {
-        await runSlices(slices, ["card"], rar, `budget ${preset.label}`, {
+        await runSlices(slices, ["card"], rar, `${tag} ${preset.label}`, {
           screen: "rating",
-          factor: BUDGET_SEARCH_FACTOR,
+          factor,
         });
       } finally {
         setRunMode(null);
       }
     },
     [running, runSlices]
+  );
+
+  /** Optimal Budget lineups run at the budget factor (×11). */
+  const runBudgetSearch = useCallback(
+    (preset: BudgetSearchPreset) =>
+      runPresetSearch(preset, BUDGET_SEARCH_FACTOR, "budget"),
+    [runPresetSearch]
+  );
+
+  /** Daily Pack Buys run at ×21 — anything at or under that beats a pack. */
+  const runDailyPackSearch = useCallback(
+    (preset: DailyPackPreset) =>
+      runPresetSearch(preset, DAILY_PACK_FACTOR, "daily pack"),
+    [runPresetSearch]
   );
 
   /** Autobid caps — the hard ceilings the userscript enforces. They ride in the
@@ -1031,6 +1057,37 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                       Lineups solved at ≤{BUDGET_SEARCH_CEILING} rax/rating (≥2 live listings) ·
                       rating × {BUDGET_SEARCH_FACTOR} · play cards · all rarities. Clicking one
                       closes this window and scans straight away.
+                    </span>
+                  </div>
+                </div>
+                <div className="modal-group">
+                  <div className="modal-group-label">Daily Pack Buys</div>
+                  <div className="modal-defaults">
+                    {DAILY_PACK_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="btn sm"
+                        onClick={() => void runDailyPackSearch(p)}
+                        disabled={busy}
+                        title={
+                          `Searches ${p.cards} player${p.cards === 1 ? "" : "s"} of the ` +
+                          `Daily Pack Buys album at rating × ${DAILY_PACK_FACTOR}, play ` +
+                          `cards, all rarities. A pack gives ~10 rating for 200 rax ` +
+                          `(${PACK_RAX_PER_RATING} rax/rating), so anything this scan ` +
+                          `shows is cheaper fuel than the pack. Runs on click.`
+                        }
+                      >
+                        {p.cards} · {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="modal-defaults">
+                    <span className="muted-note">
+                      The 15 cards on the daily-pack grind · rating × {DAILY_PACK_FACTOR} ·
+                      play cards · all rarities. Lists anything at or under{" "}
+                      {DAILY_PACK_FACTOR} rax/rating — beats the pack&apos;s own{" "}
+                      {PACK_RAX_PER_RATING}. Clicking one closes this window and scans.
                     </span>
                   </div>
                 </div>

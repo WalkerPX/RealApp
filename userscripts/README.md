@@ -115,14 +115,25 @@ the two and says so rather than letting it look like the cap failed to update.
 ### The preset block is generated
 
 `const PRESETS` is baked in — the userscript runs on realapp.com and can't import
-`lib/`. Regenerate it after a budget sweep:
+`lib/`. Regenerate it after a budget sweep or a daily-pack edit:
 
 ```
 node scripts/autobid/export_presets.mjs
 ```
 
-It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts) and `LOW_PERRAX_SLICES`
-(lib/deals.ts), so the dropdown and Walkr's Menu can't drift apart.
+It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts), `DAILY_PACK_PRESETS`
+(lib/daily-pack-searches.ts) and `LOW_PERRAX_SLICES` (lib/deals.ts), so the
+dropdown and Walkr's Menu can't drift apart.
+
+### Per-preset rax/rating ceilings
+
+A preset may carry its own `maxRpr`. The **Daily Pack Buys** presets ship
+`maxRpr: 21`: a player pack costs 200 rax for ~10 rating (**20 rax per rating**),
+so a marketplace listing at or under 21 rpr is cheaper fuel than the pack itself.
+`effectiveMaxRpr()` resolves the ceiling per run — menu handoff → preset's own →
+`SCRIPT_CAPS` — and `render()` re-derives it, so picking a daily-pack preset and
+then switching to something else can't leave 21 behind. `PRESET_CEILINGS` keeps a
+handoff quoting 21 from tripping the stale-menu drift note.
 
 ### The 401 that wasn't an auth problem
 

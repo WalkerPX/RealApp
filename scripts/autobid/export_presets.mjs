@@ -4,11 +4,13 @@
  * from the two files that already own that data:
  *
  *   lib/budget-searches.ts  BUDGET_SEARCH_PRESETS  (the "Optimal Budget" lineups)
+ *   lib/daily-pack-searches.ts  DAILY_PACK_PRESETS (the "Daily Pack Buys" album)
  *   lib/deals.ts            LOW_PERRAX_SLICES      (the Low PerRax tracked players)
  *
- * The userscript runs on realapp.com and can't import either, so its copy has to
- * be baked in. Run this after a budget sweep regenerates budget-searches.ts, or
- * the dropdown will quote lineups the menu no longer agrees with.
+ * The userscript runs on realapp.com and can't import any of them, so its copy
+ * has to be baked in. Run this after a budget sweep regenerates budget-searches.ts,
+ * after editing daily-pack-searches.ts, or the dropdown will quote lineups the
+ * menu no longer agrees with.
  *
  *   node scripts/autobid/export_presets.mjs
  */
@@ -19,6 +21,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
 const budgetPath = join(root, "lib", "budget-searches.ts");
+const dailyPackPath = join(root, "lib", "daily-pack-searches.ts");
 const dealsPath = join(root, "lib", "deals.ts");
 const target = join(root, "userscripts", "walkr-autobid.user.js");
 
@@ -49,6 +52,34 @@ function budgetPresets() {
   return out;
 }
 
+/** daily-pack-searches.ts has the same shape, plus a per-preset rpr ceiling.
+ * That ceiling rides along as `maxRpr` so the extension screens at the same
+ * number the menu's ×21 search uses instead of the script's own 11. */
+function dailyPackPresets() {
+  const src = readFileSync(dailyPackPath, "utf8");
+  const factor = Number(/DAILY_PACK_FACTOR\s*=\s*(\d+)/.exec(src)?.[1]);
+  if (!factor) throw new Error("DAILY_PACK_FACTOR not found in lib/daily-pack-searches.ts");
+  const out = [];
+  for (const chunk of src.split(/\n\s*\{\s*\n\s*id:\s*"/).slice(1)) {
+    const id = chunk.slice(0, chunk.indexOf('"'));
+    const label = /label:\s*"([^"]+)"/.exec(chunk)?.[1];
+    const cards = Number(/cards:\s*(\d+)/.exec(chunk)?.[1]);
+    const line = /slices:\s*(\[[^\n]*\])\s*,/.exec(chunk)?.[1];
+    if (!label || !line) continue;
+    const slices = JSON.parse(line);
+    out.push({
+      id: `dailypack-${id}`,
+      label: `Daily Pack Buys · ${label}`,
+      sport: commonSport(slices),
+      cards,
+      maxRpr: factor,
+      slices: slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players })),
+    });
+  }
+  if (!out.length) throw new Error("no presets parsed out of DAILY_PACK_PRESETS");
+  return out;
+}
+
 /** deals.ts uses unquoted keys and inline /* … *\/ comments. */
 function lowPerRax() {
   const src = readFileSync(dealsPath, "utf8");
@@ -76,7 +107,7 @@ function commonSport(slices) {
   return set.size === 1 ? [...set][0] : "all";
 }
 
-const presets = [...lowPerRax(), ...budgetPresets()];
+const presets = [...lowPerRax(), ...budgetPresets(), ...dailyPackPresets()];
 const block = [
   BEGIN,
   "  const PRESETS = [",

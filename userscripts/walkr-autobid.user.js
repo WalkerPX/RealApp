@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.8
+// @version      0.3.0
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -90,6 +90,11 @@
     {"id":"budget-wnba","label":"Optimal Budget · WNBA","sport":"wnba","cards":5,"slices":[{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]}]},
     {"id":"budget-ncaaf","label":"Optimal Budget · CFB","sport":"ncaaf","cards":5,"slices":[{"sport":"ncaaf","season":2025,"players":["Jalen Buckley","Jordan Pollard"]},{"sport":"ncaaf","season":2024,"players":["Brashard Smith","Kyle McCord","Dillon Gabriel"]}]},
     {"id":"budget-all","label":"Optimal Budget · All Sports","sport":"all","cards":35,"slices":[{"sport":"nba","season":2026,"players":["De'Aaron Fox","James Harden"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]},{"sport":"nba","season":2024,"players":["Pascal Siakam","Kyrie Irving"]},{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner"]},{"sport":"nfl","season":2025,"players":["Kyren Williams","Josh Allen"]},{"sport":"nfl","season":2024,"players":["Patrick Mahomes"]},{"sport":"nfl","season":2023,"players":["C.J. Stroud","James Cook III"]},{"sport":"ncaam","season":2026,"players":["Juke Harris","Chris Bell","Rob Martin"]},{"sport":"ncaam","season":2024,"players":["Al-Amir Dawes","Ben Krikke"]},{"sport":"mlb","season":2026,"players":["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport":"mlb","season":2025,"players":["Vladimir Guerrero Jr."]},{"sport":"mlb","season":2024,"players":["Pete Alonso"]},{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]},{"sport":"ncaaf","season":2025,"players":["Jalen Buckley","Jordan Pollard"]},{"sport":"ncaaf","season":2024,"players":["Brashard Smith","Kyle McCord","Dillon Gabriel"]}]},
+    {"id":"dailypack-nhl-2023","label":"Daily Pack Buys · NHL 2023-24","sport":"nhl","cards":4,"maxRpr":21,"slices":[{"sport":"nhl","season":2023,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]}]},
+    {"id":"dailypack-nhl-2024","label":"Daily Pack Buys · NHL 2024-25","sport":"nhl","cards":3,"maxRpr":21,"slices":[{"sport":"nhl","season":2024,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]}]},
+    {"id":"dailypack-cbb-2025","label":"Daily Pack Buys · CBB 2024-25","sport":"ncaam","cards":5,"maxRpr":21,"slices":[{"sport":"ncaam","season":2025,"players":["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]}]},
+    {"id":"dailypack-cbb-2026","label":"Daily Pack Buys · CBB 2025-26","sport":"ncaam","cards":3,"maxRpr":21,"slices":[{"sport":"ncaam","season":2026,"players":["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]}]},
+    {"id":"dailypack-all","label":"Daily Pack Buys · All 15","sport":"all","cards":15,"maxRpr":21,"slices":[{"sport":"nhl","season":2023,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]},{"sport":"nhl","season":2024,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]},{"sport":"ncaam","season":2025,"players":["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]},{"sport":"ncaam","season":2026,"players":["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]}]},
   ];
   // <<< GENERATED PRESETS
 
@@ -497,6 +502,7 @@
       if (!creds["real-turnstile-token"]) { logLine("STOP: no turnstile token seen yet. Open the marketplace once, then re-run."); return; }
 
       const targets = currentTargets();
+      DEFAULTS.maxRpr = effectiveMaxRpr();
       if (!targets.length) { logLine("STOP: nothing to search — pick a Quick Search or type players."); return; }
       const label = currentLabel();
       logLine(
@@ -511,7 +517,8 @@
           drift.push(`cards ${hashPlan.maxCards} vs ${SCRIPT_CAPS.maxCards}`);
         if (hashPlan.maxSpend != null && Number(hashPlan.maxSpend) !== SCRIPT_CAPS.maxSpend)
           drift.push(`spend ${hashPlan.maxSpend} vs ${SCRIPT_CAPS.maxSpend}`);
-        if (hashPlan.maxRpr != null && Number(hashPlan.maxRpr) !== SCRIPT_CAPS.maxRpr)
+        if (hashPlan.maxRpr != null && Number(hashPlan.maxRpr) !== SCRIPT_CAPS.maxRpr &&
+            !PRESET_CEILINGS.has(Number(hashPlan.maxRpr)))
           drift.push(`rpr ${hashPlan.maxRpr} vs ${SCRIPT_CAPS.maxRpr}`);
         if (drift.length)
           logLine(`note: Walkr's Menu sent different caps (${drift.join(", ")}) — that page is an older build. Hard-refresh the site and relaunch.`);
@@ -587,9 +594,26 @@
     return "";
   }
 
+  /** The rpr ceiling for THIS run, in priority order: a Walkr's Menu handoff,
+   * then a preset that declares its own (the Daily Pack Buys presets screen at
+   * 21 — the pack's own price is 20), then the script's shipped cap. Presets
+   * other than those fall back to SCRIPT_CAPS, so picking one after another
+   * can't leave a loosened ceiling behind. */
+  function effectiveMaxRpr() {
+    if (hashPlan && hashPlan.maxRpr != null) return Number(hashPlan.maxRpr);
+    const p = quickEl && PRESETS.find((x) => x.id === quickEl.value);
+    if (p && p.maxRpr != null) return Number(p.maxRpr);
+    return SCRIPT_CAPS.maxRpr;
+  }
+
+  /** Ceilings some preset ships with on purpose — a handoff quoting one of these
+   * isn't a stale menu, so it shouldn't trip the drift note. */
+  const PRESET_CEILINGS = new Set(
+    PRESETS.filter((p) => p.maxRpr != null).map((p) => Number(p.maxRpr))
+  );
+
   function currentTargets() {
     if (hashPlan && Array.isArray(hashPlan.targets)) {
-      if (hashPlan.maxRpr != null) DEFAULTS.maxRpr = Number(hashPlan.maxRpr);
       if (hashPlan.maxCards != null) DEFAULTS.maxCards = Number(hashPlan.maxCards);
       if (hashPlan.maxSpend != null) DEFAULTS.maxSpend = Number(hashPlan.maxSpend);
       return hashPlan.targets;
@@ -735,6 +759,7 @@
 
   function render() {
     if (!panel || !panel.isConnected) return;
+    DEFAULTS.maxRpr = effectiveMaxRpr();
     const age = S.lastAt ? Math.round((Date.now() - S.lastAt) / 1000) : null;
     statusEl.textContent =
       `maxRpr ${DEFAULTS.maxRpr} · maxCards ${DEFAULTS.maxCards} · maxSpend ${DEFAULTS.maxSpend} rax\n` +
