@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.2.6
+// @version      0.2.7
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -406,17 +406,18 @@
     return found;
   }
 
-  /** Apply the three hard caps. */
+  /** Apply the three hard caps, and report which one did the cutting. */
   function buildPlan(candidates) {
     const plan = [];
     let spend = 0;
+    let limitedBy = null;
     for (const c of candidates) {
-      if (plan.length >= DEFAULTS.maxCards) break;
-      if (spend + c.price > DEFAULTS.maxSpend) continue;
+      if (plan.length >= DEFAULTS.maxCards) { limitedBy = "card cap"; break; }
+      if (spend + c.price > DEFAULTS.maxSpend) { limitedBy = limitedBy || "spend cap"; continue; }
       plan.push(c);
       spend += c.price;
     }
-    return { plan, spend };
+    return { plan, spend, limitedBy };
   }
 
   // ── state ────────────────────────────────────────────────────────────────
@@ -520,14 +521,14 @@
       if (S.stop) { logLine("stopped."); return; }
       logLine(`found ${candidates.length} qualifying listing(s)`);
 
-      const { plan, spend } = buildPlan(candidates);
+      const { plan, spend, limitedBy } = buildPlan(candidates);
       if (!plan.length) { logLine("nothing qualified — done."); S.lastPlan = null; lastBtn(); return; }
 
       logLine(`PLAN: ${plan.length} bid(s), ${spend} rax total`);
       for (const p of plan) logLine(`   ${p.player}  ${RARITY_LABEL[p.rarity]}  ${p.price} rax @ rating ${fmtR(p.rating)}  (${fmtR(p.rpr)} rpr)  #${p.listingId}`);
       const capped = candidates.length > plan.length;
       logLine(capped
-        ? `— ${candidates.length} cards found | ${plan.length} in plan (caps bit) | ${spend} rax —`
+        ? `— ${candidates.length} cards found | ${plan.length} in plan · ${limitedBy || "the caps"} cut it (limit ≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax) | ${spend} rax —`
         : `— ${plan.length} cards found | ${spend} rax total —`);
 
       // Cache it so it can be fired later without paying for a second scan.
