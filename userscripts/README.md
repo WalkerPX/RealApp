@@ -97,6 +97,14 @@ Flow: **Run** scans and caches the plan, spending nothing unless LIVE is ticked.
 Then **Bid these N (X rax)** fires *that cached plan* — no second scan. A plan
 older than 5 minutes warns first, because listings turn over.
 
+Picking a Quick Search fills a **row of player bubbles under "Players"** — the
+lineup it is about to search, one chip per player with a sport/season tag. The
+**×** drops that player for this run only (the chip greys out and its × becomes
+**↺** to undo, plus a *restore all* button). Picking a Quick Search again — or
+touching Sport/Players — clears every exclusion, so the preset is never edited.
+A slice whose players are all dropped disappears entirely rather than falling
+back to a whole-market sweep.
+
 A bid at the trigger price starts a 10-minute countdown; nobody outbids you and
 the card is yours. Bids are **not** deduped — duplicates, repeat players and low
 rarities are all bid on, on purpose.

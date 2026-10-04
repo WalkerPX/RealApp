@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.3.0
+// @version      0.3.1
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -508,7 +508,8 @@
       const label = currentLabel();
       logLine(
         `plan${label ? ` (${label})` : ""}: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax` +
-        (hashPlan ? " · caps from Walkr's Menu" : " · caps from the panel")
+        (hashPlan ? " · caps from Walkr's Menu" : " · caps from the panel") +
+        (excluded.size ? ` · ${excluded.size} player(s) dropped from this run` : "")
       );
       // A menu built before a cap change hands over the old numbers, which reads
       // as "the cap didn't update". Say so instead of letting it look like a bug.
@@ -613,22 +614,132 @@
     PRESETS.filter((p) => p.maxRpr != null).map((p) => Number(p.maxRpr))
   );
 
+  // ── per-run player exclusions (the chip row under "Players") ─────────────
+  /** Players dropped from THIS run only, keyed `sport|season|player`. Cleared
+   * every time a Quick Search is picked, so an × is a one-run decision and never
+   * edits the preset — same as clicking a player off in Walkr's Menu. */
+  let excluded = new Set();
+  const playerKey = (sport, season, name) => `${sport}|${season}|${name}`;
+
+  const SPORT_LABEL = {
+    mlb: "MLB", wnba: "WNBA", nba: "NBA", ncaaf: "CFB",
+    ncaam: "CBB", nfl: "NFL", nhl: "NHL", soccer: "FC",
+  };
+
+  /** Same season wording the site uses (lib/deals.ts seasonLabel). */
+  function seasonLabel(sport, season) {
+    if (sport === "mlb" || sport === "wnba") return String(season);
+    if (sport === "ncaam" || sport === "nba") return `${season - 1}-${String(season).slice(-2)}`;
+    return `${season}-${String((season % 100) + 1).padStart(2, "0")}`;
+  }
+
+  /** The player list the chip row is showing: a Walkr's Menu handoff, or the
+   * selected Quick Search. Manual typing returns null — there the input *is*
+   * the list, so there is nothing to chip. */
+  function sourceSlices() {
+    if (hashPlan && Array.isArray(hashPlan.targets)) return hashPlan.targets;
+    const p = quickEl && PRESETS.find((x) => x.id === quickEl.value);
+    return p ? p.slices : null;
+  }
+
+  /** Drop excluded players, then drop slices left with nobody in them — an empty
+   * player list means "sweep the whole market" in scan(), which is not what
+   * removing one chip should ask for. */
+  function applyExclusions(targets) {
+    if (!excluded.size) return targets;
+    return targets
+      .map((t) => ({
+        ...t,
+        players: (t.players || []).filter(
+          (n) => !excluded.has(playerKey(t.sport, t.season, n))
+        ),
+      }))
+      .filter((t) => (t.players || []).length);
+  }
+
   function currentTargets() {
     if (hashPlan && Array.isArray(hashPlan.targets)) {
       if (hashPlan.maxCards != null) DEFAULTS.maxCards = Number(hashPlan.maxCards);
       if (hashPlan.maxSpend != null) DEFAULTS.maxSpend = Number(hashPlan.maxSpend);
-      return hashPlan.targets;
+      return applyExclusions(hashPlan.targets.map((t) => ({ ...t })));
     }
     const preset = PRESETS.find((x) => x.id === quickEl.value);
-    if (preset) return preset.slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players }));
+    if (preset)
+      return applyExclusions(
+        preset.slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players }))
+      );
     const players = playersEl.value.split(",").map((s) => s.trim()).filter(Boolean);
     const sp = sportEl.value;
     const sports = sp === "all" ? ALL_SPORTS : [SPORT_ALIAS[sp] || sp];
     return sports.map((s) => ({ sport: s, season: SEASON[s], players }));
   }
 
+  /** Rebuild the chip row. × drops a player for this run; the chip greys out and
+   * its × becomes ↺, so a misclick is one click back. */
+  function renderChips() {
+    if (!chipsEl) return;
+    chipsEl.textContent = "";
+    const src = sourceSlices();
+    if (!src || !src.length) {
+      chipsEl.style.display = "none";
+      return;
+    }
+    chipsEl.style.display = "flex";
+    let removed = 0;
+    for (const s of src) {
+      for (const name of s.players || []) {
+        const key = playerKey(s.sport, s.season, name);
+        const gone = excluded.has(key);
+        if (gone) removed++;
+        const chip = document.createElement("span");
+        chip.style.cssText = [
+          "display:inline-flex", "align-items:center", "gap:5px",
+          "padding:2px 3px 2px 8px", "border-radius:999px",
+          `border:1px solid ${gone ? "#33415a" : "#2f4a72"}`,
+          `background:${gone ? "#141c2b" : "#122036"}`,
+          `color:${gone ? "#63748f" : "#cfe0f7"}`,
+          gone ? "text-decoration:line-through" : "",
+        ].filter(Boolean).join(";");
+        const nm = document.createElement("span");
+        nm.textContent = name;
+        const ctx = document.createElement("span");
+        ctx.textContent = `${SPORT_LABEL[s.sport] || s.sport} ${seasonLabel(s.sport, s.season)}`;
+        ctx.style.cssText = "color:#7f93b0;font-size:11px";
+        const x = document.createElement("button");
+        x.type = "button";
+        x.textContent = gone ? "\u21ba" : "\u00d7";
+        x.title = gone
+          ? `put ${name} back in this run`
+          : `drop ${name} from this run only — the preset keeps them`;
+        x.setAttribute("aria-label", gone ? `restore ${name}` : `remove ${name}`);
+        x.style.cssText =
+          "background:none;border:0;color:inherit;cursor:pointer;font:inherit;padding:0 4px;line-height:1.1";
+        x.onclick = () => {
+          if (gone) excluded.delete(key);
+          else excluded.add(key);
+          renderChips();
+          render();
+        };
+        chip.append(nm, ctx, x);
+        chipsEl.appendChild(chip);
+      }
+    }
+    if (removed) {
+      const all = btn(
+        "restore all",
+        () => { excluded.clear(); renderChips(); render(); },
+        "font-size:11px;padding:2px 8px;border-radius:999px;"
+      );
+      chipsEl.appendChild(all);
+      const note = document.createElement("span");
+      note.textContent = `${removed} out of this run only`;
+      note.style.cssText = "color:#7f93b0;font-size:11px;align-self:center";
+      chipsEl.appendChild(note);
+    }
+  }
+
   // ── UI ───────────────────────────────────────────────────────────────────
-  let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, lastBtnEl;
+  let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, lastBtnEl;
   const btn = (label, fn, css) => {
     const b = document.createElement("button");
     b.textContent = label;
@@ -677,6 +788,12 @@
     playersEl.placeholder = "players, comma separated (or pick a Quick Search)";
     playersEl.style.cssText = "background:#0b1120;color:#e6edf7;border:1px solid #2a3a55;border-radius:5px;padding:3px 6px;width:100%";
 
+    /** The bubble row under Players — the selected Quick Search's lineup, each
+     * player removable for this run. Hidden while typing players by hand. */
+    chipsEl = document.createElement("div");
+    chipsEl.style.cssText =
+      "grid-column:1/-1;display:none;flex-wrap:wrap;gap:4px;align-items:center;margin:1px 0 2px";
+
     capsEl = document.createElement("div");
     capsEl.style.cssText = "grid-column:1/-1;color:#9fb3d1";
     liveEl = document.createElement("label");
@@ -684,10 +801,11 @@
     liveEl.innerHTML = '<input type="checkbox"> LIVE (actually bid — spends rax)';
     liveEl.querySelector("input").onchange = (e) => { DEFAULTS.live = e.target.checked; render(); };
 
-    cfg.append(labeled("Quick Search"), quickEl, labeled("Sport"), sportEl, labeled("Players"), playersEl, capsEl, liveEl);
+    cfg.append(labeled("Quick Search"), quickEl, labeled("Sport"), sportEl, labeled("Players"), playersEl, chipsEl, capsEl, liveEl);
 
     quickEl.onchange = () => {
       hashPlan = null;   // a manual pick overrides a menu handoff
+      excluded.clear();  // picking a Quick Search restores every player it lists
       const p = PRESETS.find((x) => x.id === quickEl.value);
       // Picking a preset sets its sport (Low PerRax and All Sports are multi-sport,
       // so those show "all"). The preset carries its own players, so the box is
@@ -696,8 +814,8 @@
       else { playersEl.disabled = false; }
       render();
     };
-    sportEl.onchange = () => { hashPlan = null; quickEl.value = ""; playersEl.disabled = false; render(); };
-    playersEl.oninput = () => { if (playersEl.value.trim()) { hashPlan = null; quickEl.value = ""; } render(); };
+    sportEl.onchange = () => { hashPlan = null; quickEl.value = ""; excluded.clear(); playersEl.disabled = false; render(); };
+    playersEl.oninput = () => { if (playersEl.value.trim()) { hashPlan = null; quickEl.value = ""; excluded.clear(); } render(); };
 
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap";
@@ -761,6 +879,7 @@
   function render() {
     if (!panel || !panel.isConnected) return;
     DEFAULTS.maxRpr = effectiveMaxRpr();
+    renderChips();
     const age = S.lastAt ? Math.round((Date.now() - S.lastAt) / 1000) : null;
     statusEl.textContent =
       `maxRpr ${DEFAULTS.maxRpr} · maxCards ${DEFAULTS.maxCards} · maxSpend ${DEFAULTS.maxSpend} rax\n` +
