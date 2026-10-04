@@ -12,7 +12,7 @@
  * ENDING year (2025 = 2024-25).
  *
  * Grouped into {sport, season} slices because a marketplace query is always one
- * sport/season; "All 15" is every slice at once. Slices stay on one line each so
+ * sport/season; "All 16" is every slice at once. Slices stay on one line each so
  * scripts/autobid/export_presets.mjs can lift them into the userscript.
  */
 import type { WalkerOtdSlice } from "./deals";
@@ -46,6 +46,12 @@ export const DAILY_PACK_PRESETS: DailyPackPreset[] = [
     slices: [{"sport": "nhl","season": 2024,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]}],
   },
   {
+    id: "nhl-2025",
+    label: "NHL 2025-26",
+    cards: 1,
+    slices: [{"sport": "nhl","season": 2025,"players": ["Nathan MacKinnon"]}],
+  },
+  {
     id: "cbb-2025",
     label: "CBB 2024-25",
     cards: 5,
@@ -59,8 +65,8 @@ export const DAILY_PACK_PRESETS: DailyPackPreset[] = [
   },
   {
     id: "all",
-    label: "All 15",
-    cards: 15,
-    slices: [{"sport": "nhl","season": 2023,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]},{"sport": "nhl","season": 2024,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]},{"sport": "ncaam","season": 2025,"players": ["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]},{"sport": "ncaam","season": 2026,"players": ["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]}],
+    label: "All 16",
+    cards: 16,
+    slices: [{"sport": "nhl","season": 2023,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]},{"sport": "nhl","season": 2024,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]},{"sport": "nhl","season": 2025,"players": ["Nathan MacKinnon"]},{"sport": "ncaam","season": 2025,"players": ["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]},{"sport": "ncaam","season": 2026,"players": ["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]}],
   },
 ];
