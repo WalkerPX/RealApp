@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.3.1
+// @version      0.4.0
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @match        *://*.realapp.com/*
@@ -763,6 +763,7 @@
     panel.style.cssText = ["position:fixed", "right:14px", "bottom:14px", "z-index:2147483647",
       "width:430px", "max-height:74vh", "display:flex", "flex-direction:column",
       "background:#0b1120", "color:#e6edf7", "border:1px solid #2a3a55", "border-radius:10px",
+      "overflow:hidden",
       "font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace", "box-shadow:0 10px 30px rgba(0,0,0,.5)"].join(";");
 
     const head = document.createElement("div");
@@ -772,7 +773,7 @@
     makeDraggable(panel, head);
 
     const cfg = document.createElement("div");
-    cfg.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3a55;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center";
+    cfg.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3a55;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center;flex:0 1 auto;min-height:0;overflow:auto";
 
     quickEl = document.createElement("select");
     quickEl.appendChild(opt("", "— none —"));
@@ -818,16 +819,36 @@
     playersEl.oninput = () => { if (playersEl.value.trim()) { hashPlan = null; quickEl.value = ""; excluded.clear(); } render(); };
 
     const bar = document.createElement("div");
-    bar.style.cssText = "display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap";
+    bar.style.cssText = "display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap;flex:0 0 auto";
     lastBtnEl = btn("Bid these", () => bidCached(), "background:#14432b;color:#b8f5cf;border-color:#1f6b45;");
     bar.append(btn("Run", () => { if (!S.running) run(); }), lastBtnEl, btn("Clear log", () => { S.log = []; render(); }));
 
     statusEl = document.createElement("div");
-    statusEl.style.cssText = "padding:0 10px 8px;color:#9fb3d1;white-space:pre-wrap";
+    statusEl.style.cssText = "padding:0 10px 8px;color:#9fb3d1;white-space:pre-wrap;flex:0 0 auto";
     logEl = document.createElement("div");
-    logEl.style.cssText = "overflow:auto;padding:6px 10px 10px;border-top:1px solid #2a3a55;white-space:pre-wrap";
+    logEl.style.cssText = "overflow:auto;padding:6px 10px 10px;border-top:1px solid #2a3a55;white-space:pre-wrap;flex:1 1 auto;min-height:0";
 
-    panel.append(head, cfg, bar, statusEl, logEl);
+    /** The resize grip the pointer grabs; sits over the bottom-right corner. */
+    const grip = document.createElement("div");
+    grip.title = "drag to resize · double-click to reset";
+    grip.setAttribute("aria-label", "resize panel");
+    grip.style.cssText = [
+      "position:absolute", "right:0", "bottom:0", "width:22px", "height:22px",
+      "cursor:nwse-resize", "border-bottom-right-radius:10px", "touch-action:none",
+      "background:linear-gradient(135deg, transparent 0 52%, #35507c 52% 60%," +
+        " transparent 60% 70%, #35507c 70% 78%, transparent 78% 88%, #35507c 88% 96%, transparent 96% 100%)",
+    ].join(";");
+
+    panel.append(head, cfg, bar, statusEl, logEl, grip);
+    makeResizable(panel, grip);
+    // A remembered size re-opens the panel exactly as it was left.
+    const saved = storedSize();
+    if (saved) {
+      panel.style.width = saved.w + "px";
+      panel.style.height = saved.h + "px";
+      panel.style.maxHeight = "none";
+    }
+    window.addEventListener("resize", clampPanel);
     mount(panel);
     if (hashPlan && hashPlan.label) {
       const match = PRESETS.find((p) => p.label === hashPlan.label);
@@ -854,6 +875,86 @@
     });
     window.addEventListener("mousemove", (e) => { if (drag) { el.style.left = (ox + e.clientX - sx) + "px"; el.style.top = (oy + e.clientY - sy) + "px"; } });
     window.addEventListener("mouseup", () => { drag = false; });
+  }
+
+  // ── panel size: resizable + remembered ───────────────────────────────────
+  const SIZE_KEY = "walkr.autobid.size.v1";
+  const SIZE_MIN = { w: 340, h: 240 };
+  const SIZE_DEFAULT_W = 430;
+  const SIZE_DOCK_MAX_H = "74vh";
+
+  function storedSize() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SIZE_KEY) || "null");
+      if (s && Number.isFinite(s.w) && Number.isFinite(s.h)) return { w: s.w, h: s.h };
+    } catch (_) {}
+    return null;
+  }
+  function saveSize(w, h) {
+    try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: Math.round(w), h: Math.round(h) })); } catch (_) {}
+  }
+  function clearSize() {
+    try { localStorage.removeItem(SIZE_KEY); } catch (_) {}
+  }
+
+  /** Sizes are free to be large, but never larger than the window. */
+  const sizeCaps = () => ({
+    w: Math.max(SIZE_MIN.w, window.innerWidth - 12),
+    h: Math.max(SIZE_MIN.h, window.innerHeight - 12),
+  });
+
+  /** Keep an explicitly-sized panel on screen when the window shrinks. */
+  function clampPanel() {
+    if (!panel || !panel.style.width) return;
+    const caps = sizeCaps();
+    panel.style.width = Math.min(parseFloat(panel.style.width), caps.w) + "px";
+    if (panel.style.height) panel.style.height = Math.min(parseFloat(panel.style.height), caps.h) + "px";
+    const r = panel.getBoundingClientRect();
+    if (r.right > window.innerWidth) panel.style.left = Math.max(4, window.innerWidth - r.width - 8) + "px";
+    if (r.bottom > window.innerHeight) panel.style.top = Math.max(4, window.innerHeight - r.height - 8) + "px";
+  }
+
+  /** Bottom-right grip: drag to resize, double-click to go back to the default
+   * dock. The size is remembered across reloads; the *position* still comes from
+   * dragging the header. Pinning the top-left on mousedown means growing always
+   * goes down-and-right and a resize can't walk the panel off the screen. */
+  function makeResizable(el, grip) {
+    let sx, sy, sw, sh, on = false;
+    grip.addEventListener("mousedown", (e) => {
+      const r = el.getBoundingClientRect();
+      el.style.right = "auto"; el.style.bottom = "auto";
+      el.style.left = r.left + "px"; el.style.top = r.top + "px";
+      el.style.width = r.width + "px"; el.style.height = r.height + "px";
+      el.style.maxHeight = "none";
+      sx = e.clientX; sy = e.clientY; sw = r.width; sh = r.height; on = true;
+      el.style.userSelect = "none";
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!on) return;
+      const caps = sizeCaps();
+      el.style.width = Math.min(caps.w, Math.max(SIZE_MIN.w, sw + (e.clientX - sx))) + "px";
+      el.style.height = Math.min(caps.h, Math.max(SIZE_MIN.h, sh + (e.clientY - sy))) + "px";
+    });
+    window.addEventListener("mouseup", () => {
+      if (!on) return;
+      on = false;
+      el.style.userSelect = "";
+      saveSize(parseFloat(el.style.width), parseFloat(el.style.height));
+      render();
+    });
+    grip.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearSize();
+      el.style.width = SIZE_DEFAULT_W + "px";
+      el.style.height = "";
+      el.style.maxHeight = SIZE_DOCK_MAX_H;
+      el.style.left = "auto"; el.style.top = "auto";
+      el.style.right = "14px"; el.style.bottom = "14px";
+      render();
+    });
   }
 
   /** The "Bid these" button only lights up once a plan exists. */

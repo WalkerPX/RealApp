@@ -109,6 +109,20 @@ A bid at the trigger price starts a 10-minute countdown; nobody outbids you and
 the card is yours. Bids are **not** deduped — duplicates, repeat players and low
 rarities are all bid on, on purpose.
 
+### Resizing the panel
+
+The panel is **resizable**: drag the diagonal grip in the bottom-right corner,
+or **double-click it to snap back to the default dock** (bottom-right, 74vh).
+The size is remembered in `localStorage` (`walkr.autobid.size.v1`) across
+reloads; the *position* is still whatever you last dragged the header to. The
+grip pins the panel's top-left on grab, so growing always goes down-and-right
+and a resize can't walk the panel off screen — `clampPanel()` also re-clamps on
+window resize. Minimum 340×240; nothing can exceed the window.
+
+Inside the panel the log takes up the slack (`flex:1; min-height:0`) and the
+config block shrinks and scrolls before anything gets clipped, so the chips and
+the preset dropdown stay reachable at any height.
+
 Hard caps, enforced in code: **≤11 rax/rating · ≤50 cards · ≤1000 rax per run**.
 STOP halts between every step. A failed bid stops the run — except the two
 ordinary auction losses: the listing vanished, or somebody bid a moment first and
