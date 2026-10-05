@@ -9,7 +9,7 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const YEAR = 2028;
 
 /** Rax-per-rating ceilings the budget filter offers. */
-const BUDGET_CEILINGS = [10, 20];
+const BUDGET_CEILINGS = [10, 15, 20];
 
 function asofLabel(iso: string | null): string {
   if (!iso) return "";
