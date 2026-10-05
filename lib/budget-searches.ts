@@ -8,6 +8,11 @@
  *
  * Grouped per sport into {sport, season} slices because a marketplace query is
  * always one sport/season; "All Sports" is every sport's lineup at once.
+ *
+ * A preset may also carry `playerCaps`: per-player rax-per-rating ceilings for
+ * cards the lineup buys looser than the ceiling on purpose (deep market => you
+ * can level them to Legendary fast). Everyone else in the lineup screens at the
+ * ceiling. Keep both in sync by re-running the generator.
  */
 import type { WalkerOtdSlice } from "./deals";
 
@@ -18,6 +23,8 @@ export interface BudgetSearchPreset {
   cards: number;
   /** Base rax/yr the lineup is worth (unboosted). */
   best: number;
+  /** Per-player ceilings, for cards bought above BUDGET_SEARCH_CEILING. */
+  playerCaps?: Record<string, number>;
   slices: WalkerOtdSlice[];
 }
 
@@ -38,9 +45,10 @@ export const BUDGET_SEARCH_PRESETS: BudgetSearchPreset[] = [
   {
     id: "nhl",
     label: "NHL",
-    cards: 5,
-    best: 1867,
-    slices: [{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner"]}],
+    cards: 7,
+    best: 2368,
+    playerCaps: {"Jack Eichel": 15, "Filip Forsberg": 15},
+    slices: [{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner","Filip Forsberg"]}],
   },
   {
     id: "nfl",
@@ -80,8 +88,9 @@ export const BUDGET_SEARCH_PRESETS: BudgetSearchPreset[] = [
   {
     id: "all",
     label: "All Sports",
-    cards: 35,
-    best: 12210,
-    slices: [{"sport": "nba","season": 2026,"players": ["De'Aaron Fox","James Harden"]},{"sport": "nba","season": 2025,"players": ["Pascal Siakam"]},{"sport": "nba","season": 2024,"players": ["Pascal Siakam","Kyrie Irving"]},{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner"]},{"sport": "nfl","season": 2025,"players": ["Kyren Williams","Josh Allen"]},{"sport": "nfl","season": 2024,"players": ["Patrick Mahomes"]},{"sport": "nfl","season": 2023,"players": ["C.J. Stroud","James Cook III"]},{"sport": "ncaam","season": 2026,"players": ["Juke Harris","Chris Bell","Rob Martin"]},{"sport": "ncaam","season": 2024,"players": ["Al-Amir Dawes","Ben Krikke"]},{"sport": "mlb","season": 2026,"players": ["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport": "mlb","season": 2025,"players": ["Vladimir Guerrero Jr."]},{"sport": "mlb","season": 2024,"players": ["Pete Alonso"]},{"sport": "wnba","season": 2026,"players": ["Kelsey Mitchell","Paige Bueckers"]},{"sport": "wnba","season": 2025,"players": ["Chelsea Gray","Satou Sabally"]},{"sport": "wnba","season": 2024,"players": ["Kayla McBride"]},{"sport": "ncaaf","season": 2025,"players": ["Jalen Buckley","Jordan Pollard"]},{"sport": "ncaaf","season": 2024,"players": ["Brashard Smith","Kyle McCord","Dillon Gabriel"]}],
+    cards: 37,
+    best: 12711,
+    playerCaps: {"Jack Eichel": 15, "Filip Forsberg": 15},
+    slices: [{"sport": "nba","season": 2026,"players": ["De'Aaron Fox","James Harden"]},{"sport": "nba","season": 2025,"players": ["Pascal Siakam"]},{"sport": "nba","season": 2024,"players": ["Pascal Siakam","Kyrie Irving"]},{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner","Filip Forsberg"]},{"sport": "nfl","season": 2025,"players": ["Kyren Williams","Josh Allen"]},{"sport": "nfl","season": 2024,"players": ["Patrick Mahomes"]},{"sport": "nfl","season": 2023,"players": ["C.J. Stroud","James Cook III"]},{"sport": "ncaam","season": 2026,"players": ["Juke Harris","Chris Bell","Rob Martin"]},{"sport": "ncaam","season": 2024,"players": ["Al-Amir Dawes","Ben Krikke"]},{"sport": "mlb","season": 2026,"players": ["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport": "mlb","season": 2025,"players": ["Vladimir Guerrero Jr."]},{"sport": "mlb","season": 2024,"players": ["Pete Alonso"]},{"sport": "wnba","season": 2026,"players": ["Kelsey Mitchell","Paige Bueckers"]},{"sport": "wnba","season": 2025,"players": ["Chelsea Gray","Satou Sabally"]},{"sport": "wnba","season": 2024,"players": ["Kayla McBride"]},{"sport": "ncaaf","season": 2025,"players": ["Jalen Buckley","Jordan Pollard"]},{"sport": "ncaaf","season": 2024,"players": ["Brashard Smith","Kyle McCord","Dillon Gabriel"]}],
   },
 ];

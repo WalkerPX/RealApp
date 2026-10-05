@@ -83,13 +83,13 @@
   const PRESETS = [
     {"id":"lowperrax","label":"Low PerRax","sport":"all","cards":9,"slices":[{"sport":"nhl","season":2025,"players":["Jake Guentzel"]},{"sport":"nhl","season":2024,"players":["Brandon Hagel"]},{"sport":"nhl","season":2023,"players":["Jake Guentzel"]},{"sport":"ncaam","season":2026,"players":["Trey Kaufman-Renn","Lamar Wilkerson","Dailyn Swain"]},{"sport":"ncaam","season":2025,"players":["Trey Kaufman-Renn"]},{"sport":"nba","season":2024,"players":["Myles Turner"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]}]},
     {"id":"budget-nba","label":"Optimal Budget · NBA","sport":"nba","cards":5,"slices":[{"sport":"nba","season":2026,"players":["De'Aaron Fox","James Harden"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]},{"sport":"nba","season":2024,"players":["Pascal Siakam","Kyrie Irving"]}]},
-    {"id":"budget-nhl","label":"Optimal Budget · NHL","sport":"nhl","cards":5,"slices":[{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner"]}]},
+    {"id":"budget-nhl","label":"Optimal Budget · NHL","sport":"nhl","cards":7,"slices":[{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner","Filip Forsberg"]}],"playerCaps":{"Jack Eichel":15,"Filip Forsberg":15}},
     {"id":"budget-nfl","label":"Optimal Budget · NFL","sport":"nfl","cards":5,"slices":[{"sport":"nfl","season":2025,"players":["Kyren Williams","Josh Allen"]},{"sport":"nfl","season":2024,"players":["Patrick Mahomes"]},{"sport":"nfl","season":2023,"players":["C.J. Stroud","James Cook III"]}]},
     {"id":"budget-ncaam","label":"Optimal Budget · CBB","sport":"ncaam","cards":5,"slices":[{"sport":"ncaam","season":2026,"players":["Juke Harris","Chris Bell","Rob Martin"]},{"sport":"ncaam","season":2024,"players":["Al-Amir Dawes","Ben Krikke"]}]},
     {"id":"budget-mlb","label":"Optimal Budget · MLB","sport":"mlb","cards":5,"slices":[{"sport":"mlb","season":2026,"players":["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport":"mlb","season":2025,"players":["Vladimir Guerrero Jr."]},{"sport":"mlb","season":2024,"players":["Pete Alonso"]}]},
     {"id":"budget-wnba","label":"Optimal Budget · WNBA","sport":"wnba","cards":5,"slices":[{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]}]},
     {"id":"budget-ncaaf","label":"Optimal Budget · CFB","sport":"ncaaf","cards":5,"slices":[{"sport":"ncaaf","season":2025,"players":["Jalen Buckley","Jordan Pollard"]},{"sport":"ncaaf","season":2024,"players":["Brashard Smith","Kyle McCord","Dillon Gabriel"]}]},
-    {"id":"budget-all","label":"Optimal Budget · All Sports","sport":"all","cards":35,"slices":[{"sport":"nba","season":2026,"players":["De'Aaron Fox","James Harden"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]},{"sport":"nba","season":2024,"players":["Pascal Siakam","Kyrie Irving"]},{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner"]},{"sport":"nfl","season":2025,"players":["Kyren Williams","Josh Allen"]},{"sport":"nfl","season":2024,"players":["Patrick Mahomes"]},{"sport":"nfl","season":2023,"players":["C.J. Stroud","James Cook III"]},{"sport":"ncaam","season":2026,"players":["Juke Harris","Chris Bell","Rob Martin"]},{"sport":"ncaam","season":2024,"players":["Al-Amir Dawes","Ben Krikke"]},{"sport":"mlb","season":2026,"players":["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport":"mlb","season":2025,"players":["Vladimir Guerrero Jr."]},{"sport":"mlb","season":2024,"players":["Pete Alonso"]},{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]},{"sport":"ncaaf","season":2025,"players":["Jalen Buckley","Jordan Pollard"]},{"sport":"ncaaf","season":2024,"players":["Brashard Smith","Kyle McCord","Dillon Gabriel"]}]},
+    {"id":"budget-all","label":"Optimal Budget · All Sports","sport":"all","cards":37,"slices":[{"sport":"nba","season":2026,"players":["De'Aaron Fox","James Harden"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]},{"sport":"nba","season":2024,"players":["Pascal Siakam","Kyrie Irving"]},{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner","Filip Forsberg"]},{"sport":"nfl","season":2025,"players":["Kyren Williams","Josh Allen"]},{"sport":"nfl","season":2024,"players":["Patrick Mahomes"]},{"sport":"nfl","season":2023,"players":["C.J. Stroud","James Cook III"]},{"sport":"ncaam","season":2026,"players":["Juke Harris","Chris Bell","Rob Martin"]},{"sport":"ncaam","season":2024,"players":["Al-Amir Dawes","Ben Krikke"]},{"sport":"mlb","season":2026,"players":["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport":"mlb","season":2025,"players":["Vladimir Guerrero Jr."]},{"sport":"mlb","season":2024,"players":["Pete Alonso"]},{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]},{"sport":"ncaaf","season":2025,"players":["Jalen Buckley","Jordan Pollard"]},{"sport":"ncaaf","season":2024,"players":["Brashard Smith","Kyle McCord","Dillon Gabriel"]}],"playerCaps":{"Jack Eichel":15,"Filip Forsberg":15}},
     {"id":"dailypack-nhl-2023","label":"Daily Pack Buys · NHL 2023-24","sport":"nhl","cards":4,"maxRpr":21,"slices":[{"sport":"nhl","season":2023,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]}]},
     {"id":"dailypack-nhl-2024","label":"Daily Pack Buys · NHL 2024-25","sport":"nhl","cards":3,"maxRpr":21,"slices":[{"sport":"nhl","season":2024,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]}]},
     {"id":"dailypack-nhl-2025","label":"Daily Pack Buys · NHL 2025-26","sport":"nhl","cards":1,"maxRpr":21,"slices":[{"sport":"nhl","season":2025,"players":["Nathan MacKinnon"]}]},
@@ -347,6 +347,32 @@
   /** Real reports ratings as float noise (4.799999999999999) — show 2dp. */
   const fmtR = (n) => (Number.isFinite(n) ? String(Number(n.toFixed(2))) : "—");
 
+  /** Per-player ceilings the active lineup carries. Empty unless a preset — or a
+   * Walkr's Menu handoff — names one, so every other search still screens at the
+   * script's own ceiling. */
+  const NO_CAPS = {};
+  function activePlayerCaps() {
+    if (hashPlan) {
+      if (hashPlan.playerCaps) return hashPlan.playerCaps;
+      // A menu built before per-player ceilings existed sends none. If its label
+      // still names a preset we have, use that preset's caps — otherwise the
+      // loosened players would silently fall back to the script's own ceiling.
+      const lbl = String(hashPlan.label || "");
+      const match = PRESETS.find((p) => p.label === lbl);
+      return (match && match.playerCaps) || NO_CAPS;
+    }
+    const p = quickEl && PRESETS.find((x) => x.id === quickEl.value);
+    return (p && p.playerCaps) || NO_CAPS;
+  }
+
+  /** The rax-per-rating ceiling for one player: their own when the lineup names
+   * one (the deep-market cards worth a looser price because they level fast),
+   * otherwise the run's ceiling. */
+  function capFor(name) {
+    const c = activePlayerCaps()[name];
+    return c == null ? DEFAULTS.maxRpr : Number(c);
+  }
+
   /** One listing → a plan candidate, or nothing. */
   function consider(l, sport, season, label, found) {
     const ends = l.endsAt ? Date.parse(l.endsAt) : NaN;
@@ -357,11 +383,12 @@
     const rating = listingRating(l);
     if (price == null || price <= 0 || rating == null) return;
     const rpr = price / rating;
-    if (rpr > DEFAULTS.maxRpr) return;
+    const cap = capFor(label);
+    if (rpr > cap) return;
     if (found.some((f) => f.listingId === l.id)) return;
     found.push({
       listingId: l.id, sport, season, player: label, rarity: l.rarity,
-      rating, price, rpr: Math.round(rpr * 100) / 100, endsAt: l.endsAt || null,
+      rating, price, rpr: Math.round(rpr * 100) / 100, cap, endsAt: l.endsAt || null,
       url: listingUrl(l.id),
     });
   }
@@ -506,8 +533,12 @@
       DEFAULTS.maxRpr = effectiveMaxRpr();
       if (!targets.length) { logLine("STOP: nothing to search — pick a Quick Search or type players."); return; }
       const label = currentLabel();
+      const pcaps = activePlayerCaps();
+      const pcNote = Object.keys(pcaps).length
+        ? ` · ${Object.entries(pcaps).map(([n, c]) => `${n} ${c}`).join(", ")}`
+        : "";
       logLine(
-        `plan${label ? ` (${label})` : ""}: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax` +
+        `plan${label ? ` (${label})` : ""}: ${targets.length} target group(s) · cap ${DEFAULTS.maxRpr} rpr${pcNote} · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax` +
         (hashPlan ? " · caps from Walkr's Menu" : " · caps from the panel") +
         (excluded.size ? ` · ${excluded.size} player(s) dropped from this run` : "")
       );
@@ -534,7 +565,7 @@
       if (!plan.length) { logLine("nothing qualified — done."); S.lastPlan = null; lastBtn(); return; }
 
       logLine(`PLAN: ${plan.length} bid(s), ${spend} rax total`);
-      for (const p of plan) logLine(`   ${p.player}  ${RARITY_LABEL[p.rarity]}  ${p.price} rax @ rating ${fmtR(p.rating)}  (${fmtR(p.rpr)} rpr)  #${p.listingId}`);
+      for (const p of plan) logLine(`   ${p.player}  ${RARITY_LABEL[p.rarity]}  ${p.price} rax @ rating ${fmtR(p.rating)}  (${fmtR(p.rpr)} rpr${p.cap != null && p.cap !== DEFAULTS.maxRpr ? `, cap ${p.cap}` : ""})  #${p.listingId}`);
       const capped = candidates.length > plan.length;
       logLine(capped
         ? `— ${candidates.length} cards found | ${plan.length} in plan · ${limitedBy || "the caps"} cut it (limit ≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax) | ${spend} rax —`
@@ -609,10 +640,12 @@
   }
 
   /** Ceilings some preset ships with on purpose — a handoff quoting one of these
-   * isn't a stale menu, so it shouldn't trip the drift note. */
-  const PRESET_CEILINGS = new Set(
-    PRESETS.filter((p) => p.maxRpr != null).map((p) => Number(p.maxRpr))
-  );
+   * isn't a stale menu, so it shouldn't trip the drift note. Per-player ceilings
+   * count too: 15 is a deliberate looseness, not a stale 11. */
+  const PRESET_CEILINGS = new Set([
+    ...PRESETS.filter((p) => p.maxRpr != null).map((p) => Number(p.maxRpr)),
+    ...PRESETS.flatMap((p) => Object.values(p.playerCaps || {}).map(Number)),
+  ]);
 
   // ── per-run player exclusions (the chip row under "Players") ─────────────
   /** Players dropped from THIS run only, keyed `sport|season|player`. Cleared
@@ -988,7 +1021,11 @@
       (hashPlan ? "targets: from Walkr's Menu\n" : "") +
       (S.lastPlan ? `cached plan: ${S.lastPlan.length} card(s) · ${S.lastSpend} rax · ${age}s old\n` : "") +
       (DEFAULTS.live ? "MODE: LIVE" : "MODE: dry run");
-    capsEl.textContent = `caps: ${DEFAULTS.maxRpr} rax/rating · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`;
+    const pc = activePlayerCaps();
+    const pcTxt = Object.keys(pc).length
+      ? ` (${Object.entries(pc).map(([n, c]) => `${n} ${c}`).join(", ")})`
+      : "";
+    capsEl.textContent = `caps: ${DEFAULTS.maxRpr} rax/rating${pcTxt} · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`;
     logEl.textContent = S.log.join("\n");
     logEl.scrollTop = logEl.scrollHeight;
   }

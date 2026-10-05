@@ -103,6 +103,9 @@ interface RunSlice {
   sport: DealSport;
   season: number;
   players: string[];
+  /** Overrides the run's rating factor for this slice — how a preset buys a
+   * deep-market player looser than the rest of its lineup. */
+  factor?: number;
 }
 
 /** Tracked-player menu (wlkr OTD list, grouped sport → season) — static. */
@@ -460,7 +463,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
             auctions: auctions ? "1" : "0",
             mode: scr,
           });
-          if (scr === "rating") params.set("factor", String(fac));
+          if (scr === "rating") params.set("factor", String(s.factor ?? fac));
           const label = `${SPORT_TAG[s.sport]} ${seasonLabel(s.sport, s.season)}`;
           try {
             const res = await fetch(`/api/deals?${params}`);
@@ -629,16 +632,34 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
    * tracked-player list shows what's being searched. */
   const runPresetSearch = useCallback(
     async (
-      preset: { label: string; slices: WalkerOtdSlice[] },
+      preset: {
+        label: string;
+        slices: WalkerOtdSlice[];
+        playerCaps?: Record<string, number>;
+      },
       factor: number,
       tag: "budget" | "daily pack"
     ) => {
       if (running) return;
-      const slices: RunSlice[] = preset.slices.map((s) => ({
-        sport: s.sport,
-        season: s.season,
-        players: s.players,
-      }));
+      const caps = preset.playerCaps;
+      const capped = new Set(caps ? Object.keys(caps) : []);
+      const slices: RunSlice[] = [];
+      for (const s of preset.slices) {
+        const loose = s.players.filter((p) => capped.has(p));
+        const rest = s.players.filter((p) => !capped.has(p));
+        if (rest.length) slices.push({ sport: s.sport, season: s.season, players: rest });
+        // A scan is one factor per query, so the loosened players get their own
+        // slice at their own ceiling — same sport/season, a second query for it.
+        const byCap = new Map<number, string[]>();
+        for (const p of loose) {
+          const c = caps![p];
+          if (!byCap.has(c)) byCap.set(c, []);
+          byCap.get(c)!.push(p);
+        }
+        for (const [c, players] of byCap)
+          slices.push({ sport: s.sport, season: s.season, players, factor: c });
+      }
+      if (!slices.length) return;
       const rar = [7, 6, 5, 4, 3, 2, 1];
       setChecked(
         slices.flatMap((s) => s.players.map((p) => walkerOtdKey(s.sport, s.season, p)))
@@ -688,7 +709,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
    * realapp.com (Real signs marketplace writes with a page-minted Turnstile
    * token, so nothing server-side can bid); it re-scans the lineup live and
    * bids. Everything below is dry-run until LIVE is ticked in its panel. */
-  const openAutobid = (slices: WalkerOtdSlice[], label: string) => {
+  const openAutobid = (slices: WalkerOtdSlice[], label: string, playerCaps?: Record<string, number>) => {
     const payload = {
       targets: slices.map((s) => ({
         sport: s.sport,
@@ -696,6 +717,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
         players: s.players,
       })),
       ...autobidCaps,
+      ...(playerCaps && Object.keys(playerCaps).length ? { playerCaps } : {}),
       label,
     };
     const url = `https://www.realapp.com/#walkr=${toBase64Url(JSON.stringify(payload))}`;
@@ -1055,8 +1077,10 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                   <div className="modal-defaults">
                     <span className="muted-note">
                       Lineups solved at ≤{BUDGET_SEARCH_CEILING} rax/rating (≥2 live listings) ·
-                      rating × {BUDGET_SEARCH_FACTOR} · play cards · all rarities. Clicking one
-                      closes this window and scans straight away.
+                      rating × {BUDGET_SEARCH_FACTOR} · play cards · all rarities. A preset may name
+                      individual players it buys looser (their market is deep, so a few extra rax
+                      per rating levels them fast) — the autobid screens each of those at its own
+                      ceiling. Clicking one closes this window and scans straight away.
                     </span>
                   </div>
                 </div>
@@ -1112,7 +1136,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                         key={`bid-${p.id}`}
                         type="button"
                         className="btn sm"
-                        onClick={() => openAutobid(p.slices, `Optimal Budget · ${p.label}`)}
+                        onClick={() => openAutobid(p.slices, `Optimal Budget · ${p.label}`, p.playerCaps)}
                         disabled={busy}
                         title={
                           `Opens realapp.com with the ${p.label} lineup loaded into the Walkr ` +

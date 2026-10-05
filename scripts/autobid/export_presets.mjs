@@ -30,7 +30,10 @@ const END = "  // <<< GENERATED PRESETS";
 
 const playersIn = (s) => (s.match(/"([^"]*)"/g) || []).map((x) => x.slice(1, -1));
 
-/** budget-searches.ts slices are pure JSON on one line each. */
+/** budget-searches.ts slices are pure JSON on one line each, and a preset may
+ * carry a per-player ceiling map (`playerCaps`) for cards it buys looser than
+ * the ceiling — that rides along so the extension screens each player at the
+ * same number the menu does. */
 function budgetPresets() {
   const src = readFileSync(budgetPath, "utf8");
   const out = [];
@@ -39,15 +42,18 @@ function budgetPresets() {
     const label = /label:\s*"([^"]+)"/.exec(chunk)?.[1];
     const cards = Number(/cards:\s*(\d+)/.exec(chunk)?.[1]);
     const line = /slices:\s*(\[[^\n]*\])\s*,/.exec(chunk)?.[1];
+    const caps = /playerCaps:\s*(\{[^\n]*\})\s*,/.exec(chunk)?.[1];
     if (!label || !line) continue;
     const slices = JSON.parse(line);
-    out.push({
+    const preset = {
       id: `budget-${id}`,
       label: `Optimal Budget · ${label}`,
       sport: commonSport(slices),
       cards,
       slices: slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players })),
-    });
+    };
+    if (caps) preset.playerCaps = JSON.parse(caps);
+    out.push(preset);
   }
   return out;
 }
