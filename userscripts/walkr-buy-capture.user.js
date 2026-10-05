@@ -4,6 +4,8 @@
 // @version      0.1.1
 // @description  Records Real's marketplace WRITE requests (Buy Now / bid) so the exact flow can be learned. Captures only — never sends anything, never buys anything.
 // @author       walkr
+// @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-buy-capture.user.js
+// @downloadURL  https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-buy-capture.user.js
 // @match        *://*.realapp.com/*
 // @match        *://realapp.com/*
 // @run-at       document-start

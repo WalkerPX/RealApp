@@ -6,6 +6,11 @@ server can never produce one, so anything that *spends* has to run in Walker's
 logged-in browser. Reads (`/cardmarketplacelistings`, `/marketplace/fmv/...`)
 stay server-side in `lib/real-api.ts`; writes live here.
 
+Both scripts carry `@updateURL` / `@downloadURL` pointing at `main` on GitHub, so
+Tampermonkey offers the new version on its own once `@version` is bumped — no
+reinstall by hand. To pull one immediately: Tampermonkey → the script →
+**Check for updates**, or open the raw URL.
+
 ## walkr-buy-capture.user.js — step 1, recon
 
 Captures the exact Buy Now request so the buy flow can be replayed. It **records
