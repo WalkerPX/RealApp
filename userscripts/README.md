@@ -143,9 +143,12 @@ the two and says so rather than letting it look like the cap failed to update.
 node scripts/autobid/export_presets.mjs
 ```
 
-It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts), `DAILY_PACK_PRESETS`
-(lib/daily-pack-searches.ts) and `LOW_PERRAX_SLICES` (lib/deals.ts), so the
-dropdown and Walkr's Menu can't drift apart.
+It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts), `MAX_SEARCH_PRESETS`
+(lib/max-searches.ts), `SETUP_SEARCH_PRESETS` (lib/setup-searches.ts),
+`DAILY_PACK_PRESETS` (lib/daily-pack-searches.ts) and `LOW_PERRAX_SLICES`
+(lib/deals.ts), so the dropdown and Walkr's Menu can't drift apart. Optimal MAX
+and Optimal Setup presets ship no `maxRpr` — the menu screens them at the Daily
+Pack ceiling (21), the extension still screens at its own `SCRIPT_CAPS.maxRpr`.
 
 ### Per-preset rax/rating ceilings
 

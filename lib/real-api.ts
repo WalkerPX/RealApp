@@ -377,7 +377,15 @@ interface SearchEntity {
   entity?: { id?: number; firstName?: string; lastName?: string; sport?: string };
 }
 
-const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+/** Lowercase alphanumerics, diacritics folded — Real stores "Nikola Jokić" and
+ * "Luka Dončić" while the OTD data and the search presets write plain ASCII, so
+ * a bare strip drops the accented letter (ć) entirely and the exact match misses. */
+const nameKey = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
 /** Resolve "Ryan Browne" → the player entity id Real's own search returns.
  * Exact full-name match wins; a surname-only match is the fallback (play-card

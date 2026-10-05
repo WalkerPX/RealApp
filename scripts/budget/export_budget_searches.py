@@ -19,11 +19,10 @@ REPO = Path(__file__).resolve().parents[2]
 K = int(sys.argv[1]) if len(sys.argv) > 1 else 5
 CEIL = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 
-# menu order requested by the user, then CFB — All Sports is 5 per sport across
-# all 7, so CFB's lineup has to be there for the 35 to add up.
-ORDER = ["nba", "nhl", "nfl", "ncaam", "mlb", "wnba", "ncaaf"]
-LABEL = {"nba": "NBA", "nhl": "NHL", "nfl": "NFL", "ncaam": "CBB",
-         "mlb": "MLB", "wnba": "WNBA", "ncaaf": "CFB"}
+# menu order requested by the user. NFL and CFB are parked for now, so All
+# Sports unions the five remaining lineups.
+ORDER = ["nba", "nhl", "ncaam", "mlb", "wnba"]
+LABEL = {"nba": "NBA", "nhl": "NHL", "ncaam": "CBB", "mlb": "MLB", "wnba": "WNBA"}
 
 # Cards a lineup keeps on purpose even though the solver wouldn't pick them, each
 # with the ceiling it is bought at. These are the deep-market cards: a few extra

@@ -303,9 +303,15 @@ export interface DealsResult {
   unresolved?: string[];
 }
 
-/** Lowercase alphanumerics only — "A'ja Wilson" == "Aja Wilson". */
+/** Lowercase alphanumerics with diacritics folded — "A'ja Wilson" == "Aja Wilson",
+ * and "Nikola Jokić" == "Nikola Jokic" (Real stores the accented form, the OTD
+ * data and presets write ASCII). */
 export function normName(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function playerMatches(label: string, queries: string[]): boolean {

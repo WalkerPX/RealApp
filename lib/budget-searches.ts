@@ -51,13 +51,6 @@ export const BUDGET_SEARCH_PRESETS: BudgetSearchPreset[] = [
     slices: [{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner","Filip Forsberg"]}],
   },
   {
-    id: "nfl",
-    label: "NFL",
-    cards: 5,
-    best: 1936,
-    slices: [{"sport": "nfl","season": 2025,"players": ["Kyren Williams","Josh Allen"]},{"sport": "nfl","season": 2024,"players": ["Patrick Mahomes"]},{"sport": "nfl","season": 2023,"players": ["C.J. Stroud","James Cook III"]}],
-  },
-  {
     id: "ncaam",
     label: "CBB",
     cards: 5,
@@ -79,18 +72,11 @@ export const BUDGET_SEARCH_PRESETS: BudgetSearchPreset[] = [
     slices: [{"sport": "wnba","season": 2026,"players": ["Kelsey Mitchell","Paige Bueckers"]},{"sport": "wnba","season": 2025,"players": ["Chelsea Gray","Satou Sabally"]},{"sport": "wnba","season": 2024,"players": ["Kayla McBride"]}],
   },
   {
-    id: "ncaaf",
-    label: "CFB",
-    cards: 5,
-    best: 1665,
-    slices: [{"sport": "ncaaf","season": 2025,"players": ["Jalen Buckley","Jordan Pollard"]},{"sport": "ncaaf","season": 2024,"players": ["Brashard Smith","Kyle McCord","Dillon Gabriel"]}],
-  },
-  {
     id: "all",
     label: "All Sports",
-    cards: 37,
-    best: 12711,
+    cards: 27,
+    best: 9110,
     playerCaps: {"Jack Eichel": 15, "Filip Forsberg": 15},
-    slices: [{"sport": "nba","season": 2026,"players": ["De'Aaron Fox","James Harden"]},{"sport": "nba","season": 2025,"players": ["Pascal Siakam"]},{"sport": "nba","season": 2024,"players": ["Pascal Siakam","Kyrie Irving"]},{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner","Filip Forsberg"]},{"sport": "nfl","season": 2025,"players": ["Kyren Williams","Josh Allen"]},{"sport": "nfl","season": 2024,"players": ["Patrick Mahomes"]},{"sport": "nfl","season": 2023,"players": ["C.J. Stroud","James Cook III"]},{"sport": "ncaam","season": 2026,"players": ["Juke Harris","Chris Bell","Rob Martin"]},{"sport": "ncaam","season": 2024,"players": ["Al-Amir Dawes","Ben Krikke"]},{"sport": "mlb","season": 2026,"players": ["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport": "mlb","season": 2025,"players": ["Vladimir Guerrero Jr."]},{"sport": "mlb","season": 2024,"players": ["Pete Alonso"]},{"sport": "wnba","season": 2026,"players": ["Kelsey Mitchell","Paige Bueckers"]},{"sport": "wnba","season": 2025,"players": ["Chelsea Gray","Satou Sabally"]},{"sport": "wnba","season": 2024,"players": ["Kayla McBride"]},{"sport": "ncaaf","season": 2025,"players": ["Jalen Buckley","Jordan Pollard"]},{"sport": "ncaaf","season": 2024,"players": ["Brashard Smith","Kyle McCord","Dillon Gabriel"]}],
+    slices: [{"sport": "nba","season": 2026,"players": ["De'Aaron Fox","James Harden"]},{"sport": "nba","season": 2025,"players": ["Pascal Siakam"]},{"sport": "nba","season": 2024,"players": ["Pascal Siakam","Kyrie Irving"]},{"sport": "nhl","season": 2025,"players": ["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport": "nhl","season": 2024,"players": ["Sam Bennett","Kyle Connor"]},{"sport": "nhl","season": 2023,"players": ["Stuart Skinner","Filip Forsberg"]},{"sport": "ncaam","season": 2026,"players": ["Juke Harris","Chris Bell","Rob Martin"]},{"sport": "ncaam","season": 2024,"players": ["Al-Amir Dawes","Ben Krikke"]},{"sport": "mlb","season": 2026,"players": ["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport": "mlb","season": 2025,"players": ["Vladimir Guerrero Jr."]},{"sport": "mlb","season": 2024,"players": ["Pete Alonso"]},{"sport": "wnba","season": 2026,"players": ["Kelsey Mitchell","Paige Bueckers"]},{"sport": "wnba","season": 2025,"players": ["Chelsea Gray","Satou Sabally"]},{"sport": "wnba","season": 2024,"players": ["Kayla McBride"]}],
   },
 ];

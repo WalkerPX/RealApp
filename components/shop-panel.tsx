@@ -33,6 +33,16 @@ import {
   PACK_RAX_PER_RATING,
   type DailyPackPreset,
 } from "@/lib/daily-pack-searches";
+import {
+  MAX_SEARCH_FACTOR,
+  MAX_SEARCH_PRESETS,
+  type MaxSearchPreset,
+} from "@/lib/max-searches";
+import {
+  SETUP_SEARCH_FACTOR,
+  SETUP_SEARCH_PRESETS,
+  type SetupSearchPreset,
+} from "@/lib/setup-searches";
 
 // ── Autobid ──────────────────────────────────────────────────────────────────
 // The bidder is a userscript on realapp.com (see userscripts/walkr-autobid).
@@ -236,7 +246,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
   const [menuTab, setMenuTab] = useState<"quick" | "earnings">("quick");
   const [running, setRunning] = useState(false);
   const [runMode, setRunMode] = useState<
-    "market" | "otd" | "active" | "budget" | "daily pack" | null
+    "market" | "otd" | "active" | "budget" | "daily pack" | "max" | "setup" | null
   >(null);
   // wlkr Active scan card type: bulk rating passes vs individual play cards.
   const [activeMode, setActiveMode] = useState<"bulk" | "play">("bulk");
@@ -638,7 +648,7 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
         playerCaps?: Record<string, number>;
       },
       factor: number,
-      tag: "budget" | "daily pack"
+      tag: "budget" | "daily pack" | "max" | "setup"
     ) => {
       if (running) return;
       const caps = preset.playerCaps;
@@ -694,6 +704,19 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
   const runDailyPackSearch = useCallback(
     (preset: DailyPackPreset) =>
       runPresetSearch(preset, DAILY_PACK_FACTOR, "daily pack"),
+    [runPresetSearch]
+  );
+
+  /** Optimal MAX runs at the pack-rate screen (×21). */
+  const runMaxSearch = useCallback(
+    (preset: MaxSearchPreset) => runPresetSearch(preset, MAX_SEARCH_FACTOR, "max"),
+    [runPresetSearch]
+  );
+
+  /** Optimal Setup runs at the pack-rate screen (×21). */
+  const runSetupSearch = useCallback(
+    (preset: SetupSearchPreset) =>
+      runPresetSearch(preset, SETUP_SEARCH_FACTOR, "setup"),
     [runPresetSearch]
   );
 
@@ -1085,6 +1108,69 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                   </div>
                 </div>
                 <div className="modal-group">
+                  <div className="modal-group-label">Optimal MAX</div>
+                  <div className="modal-defaults">
+                    {MAX_SEARCH_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="btn sm"
+                        onClick={() => void runMaxSearch(p)}
+                        disabled={busy}
+                        title={
+                          `Optimal MAX ${p.label} — ${p.cards} push cards ` +
+                          `(${p.best.toLocaleString()} base rax/yr). Searches ${p.cards} ` +
+                          `player${p.cards === 1 ? "" : "s"} at rating × ${MAX_SEARCH_FACTOR}, ` +
+                          `play cards, all rarities — pack-rate fuel only, so nothing ` +
+                          `costlier than a daily pack shows. Runs on click.`
+                        }
+                      >
+                        {p.cards} Card {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="modal-defaults">
+                    <span className="muted-note">
+                      Pack-rate counterpart to Optimal Budget: screens at ≤{MAX_SEARCH_FACTOR}{" "}
+                      rax/rating, so it lists only market fuel that costs the same as a daily pack
+                      or less (a pack is 200 rax for ~10 rating). Reading the rax/rating column
+                      picks the buys. The autobid still caps its own bids at {AUTOBID_MAX_RPR}.
+                    </span>
+                  </div>
+                </div>
+                <div className="modal-group">
+                  <div className="modal-group-label">Optimal Setup</div>
+                  <div className="modal-defaults">
+                    {SETUP_SEARCH_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="btn sm"
+                        onClick={() => void runSetupSearch(p)}
+                        disabled={busy}
+                        title={
+                          `Optimal Setup ${p.label} — the ${p.cards} highest-ROI cards to ` +
+                          `push to Legendary (${p.best.toLocaleString()} base rax/yr ` +
+                          `unboosted). Searches ${p.cards} player` +
+                          `${p.cards === 1 ? "" : "s"} at rating × ${SETUP_SEARCH_FACTOR}, ` +
+                          `play cards, all rarities. Runs on click.`
+                        }
+                      >
+                        {p.cards} Card {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="modal-defaults">
+                    <span className="muted-note">
+                      The optimal-ROI upgrade set, not the optimal lineup — ranked by marginal
+                      gain with the two-claims-a-day cap recomputed after every upgrade, cut
+                      where the next card stops repaying inside a year. Screened at rating ×{" "}
+                      {SETUP_SEARCH_FACTOR} so anything listed is at or under a pack&apos;s own
+                      price. The autobid still caps its own bids at {AUTOBID_MAX_RPR}.
+                    </span>
+                  </div>
+                </div>
+                <div className="modal-group">
                   <div className="modal-group-label">Daily Pack Buys</div>
                   <div className="modal-defaults">
                     {DAILY_PACK_PRESETS.map((p) => (
@@ -1102,13 +1188,13 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                           `shows is cheaper fuel than the pack. Runs on click.`
                         }
                       >
-                        {p.cards} · {p.label}
+                        {p.label}
                       </button>
                     ))}
                   </div>
                   <div className="modal-defaults">
                     <span className="muted-note">
-                      The 15 cards on the daily-pack grind · rating × {DAILY_PACK_FACTOR} ·
+                      The 17 cards on the daily-pack grind · rating × {DAILY_PACK_FACTOR} ·
                       play cards · all rarities. Lists anything at or under{" "}
                       {DAILY_PACK_FACTOR} rax/rating — beats the pack&apos;s own{" "}
                       {PACK_RAX_PER_RATING}. Clicking one closes this window and scans.

@@ -1,6 +1,6 @@
 /**
- * "Daily Pack Buys" search presets — the 15 cards in Walker's `Daily Pack Buys`
- * album, i.e. the ones he is pushing to Legendary with one 200-rax pack a day.
+ * "Daily Pack Buys" search preset — the cards in Walker's `Daily Pack Buys`
+ * album, i.e. the ones he is pushing with one 200-rax pack a day.
  *
  * The point of this preset is NOT to bid: it exists so the marketplace can be
  * re-checked for **play cards priced at or under DAILY_PACK_FACTOR rax per
@@ -9,11 +9,12 @@
  * the buys worth making on top of the daily pack.
  *
  * Seasons follow Real's own keys: NHL by STARTING year (2023 = 2023-24), CBB by
- * ENDING year (2025 = 2024-25).
+ * ENDING year (2024 = 2023-24, 2025 = 2024-25), WNBA by STARTING year.
  *
  * Grouped into {sport, season} slices because a marketplace query is always one
- * sport/season; "All 16" is every slice at once. Slices stay on one line each so
- * scripts/autobid/export_presets.mjs can lift them into the userscript.
+ * sport/season; there is one preset ("All 18") covering every slice at once.
+ * Slices stay on one line each so scripts/autobid/export_presets.mjs can lift
+ * them into the userscript.
  */
 import type { WalkerOtdSlice } from "./deals";
 
@@ -34,39 +35,9 @@ export const PACK_RAX_PER_RATING = 20;
 
 export const DAILY_PACK_PRESETS: DailyPackPreset[] = [
   {
-    id: "nhl-2023",
-    label: "NHL 2023-24",
-    cards: 4,
-    slices: [{"sport": "nhl","season": 2023,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]}],
-  },
-  {
-    id: "nhl-2024",
-    label: "NHL 2024-25",
-    cards: 3,
-    slices: [{"sport": "nhl","season": 2024,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]}],
-  },
-  {
-    id: "nhl-2025",
-    label: "NHL 2025-26",
-    cards: 1,
-    slices: [{"sport": "nhl","season": 2025,"players": ["Nathan MacKinnon"]}],
-  },
-  {
-    id: "cbb-2025",
-    label: "CBB 2024-25",
-    cards: 5,
-    slices: [{"sport": "ncaam","season": 2025,"players": ["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]}],
-  },
-  {
-    id: "cbb-2026",
-    label: "CBB 2025-26",
-    cards: 3,
-    slices: [{"sport": "ncaam","season": 2026,"players": ["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]}],
-  },
-  {
     id: "all",
-    label: "All 16",
-    cards: 16,
-    slices: [{"sport": "nhl","season": 2023,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon","Vincent Trocheck"]},{"sport": "nhl","season": 2024,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]},{"sport": "nhl","season": 2025,"players": ["Nathan MacKinnon"]},{"sport": "ncaam","season": 2025,"players": ["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]},{"sport": "ncaam","season": 2026,"players": ["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]}],
+    label: "All 17",
+    cards: 17,
+    slices: [{"sport": "nhl","season": 2023,"players": ["Connor McDavid","Leon Draisaitl","Vincent Trocheck"]},{"sport": "nhl","season": 2024,"players": ["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]},{"sport": "nhl","season": 2025,"players": ["Nathan MacKinnon"]},{"sport": "ncaam","season": 2025,"players": ["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]},{"sport": "ncaam","season": 2026,"players": ["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]},{"sport": "ncaam","season": 2024,"players": ["Zach Edey"]},{"sport": "wnba","season": 2025,"players": ["A'ja Wilson"]}],
   },
 ];

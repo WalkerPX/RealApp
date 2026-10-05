@@ -4,6 +4,8 @@
  * from the two files that already own that data:
  *
  *   lib/budget-searches.ts  BUDGET_SEARCH_PRESETS  (the "Optimal Budget" lineups)
+ *   lib/max-searches.ts     MAX_SEARCH_PRESETS     (the "Optimal MAX" lineups)
+ *   lib/setup-searches.ts   SETUP_SEARCH_PRESETS   (the "Optimal Setup" lineups)
  *   lib/daily-pack-searches.ts  DAILY_PACK_PRESETS (the "Daily Pack Buys" album)
  *   lib/deals.ts            LOW_PERRAX_SLICES      (the Low PerRax tracked players)
  *
@@ -21,6 +23,8 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
 const budgetPath = join(root, "lib", "budget-searches.ts");
+const maxPath = join(root, "lib", "max-searches.ts");
+const setupPath = join(root, "lib", "setup-searches.ts");
 const dailyPackPath = join(root, "lib", "daily-pack-searches.ts");
 const dealsPath = join(root, "lib", "deals.ts");
 const target = join(root, "userscripts", "walkr-autobid.user.js");
@@ -55,6 +59,55 @@ function budgetPresets() {
     if (caps) preset.playerCaps = JSON.parse(caps);
     out.push(preset);
   }
+  return out;
+}
+
+/** max-searches.ts has the budget shape but no ceiling and no playerCaps: the
+ * Optimal MAX presets are searched unpriced, so they carry no `maxRpr` and the
+ * extension falls back to its own hard cap. */
+function maxPresets() {
+  const src = readFileSync(maxPath, "utf8");
+  const out = [];
+  for (const chunk of src.split(/\n\s*\{\s*\n\s*id:\s*"/).slice(1)) {
+    const id = chunk.slice(0, chunk.indexOf('"'));
+    const label = /label:\s*"([^"]+)"/.exec(chunk)?.[1];
+    const cards = Number(/cards:\s*(\d+)/.exec(chunk)?.[1]);
+    const line = /slices:\s*(\[[^\n]*\])\s*,/.exec(chunk)?.[1];
+    if (!label || !line) continue;
+    const slices = JSON.parse(line);
+    out.push({
+      id: `max-${id}`,
+      label: `Optimal MAX · ${label}`,
+      sport: commonSport(slices),
+      cards,
+      slices: slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players })),
+    });
+  }
+  if (!out.length) throw new Error("no presets parsed out of MAX_SEARCH_PRESETS");
+  return out;
+}
+
+/** setup-searches.ts is the max-searches shape exactly (hand-written, no ceiling
+ * and no playerCaps) — same parse, different label prefix. */
+function setupPresets() {
+  const src = readFileSync(setupPath, "utf8");
+  const out = [];
+  for (const chunk of src.split(/\n\s*\{\s*\n\s*id:\s*"/).slice(1)) {
+    const id = chunk.slice(0, chunk.indexOf('"'));
+    const label = /label:\s*"([^"]+)"/.exec(chunk)?.[1];
+    const cards = Number(/cards:\s*(\d+)/.exec(chunk)?.[1]);
+    const line = /slices:\s*(\[[^\n]*\])\s*,/.exec(chunk)?.[1];
+    if (!label || !line) continue;
+    const slices = JSON.parse(line);
+    out.push({
+      id: `setup-${id}`,
+      label: `Optimal Setup · ${label}`,
+      sport: commonSport(slices),
+      cards,
+      slices: slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players })),
+    });
+  }
+  if (!out.length) throw new Error("no presets parsed out of SETUP_SEARCH_PRESETS");
   return out;
 }
 
@@ -113,7 +166,13 @@ function commonSport(slices) {
   return set.size === 1 ? [...set][0] : "all";
 }
 
-const presets = [...lowPerRax(), ...budgetPresets(), ...dailyPackPresets()];
+const presets = [
+  ...lowPerRax(),
+  ...budgetPresets(),
+  ...maxPresets(),
+  ...setupPresets(),
+  ...dailyPackPresets(),
+];
 const block = [
   BEGIN,
   "  const PRESETS = [",
