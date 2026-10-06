@@ -249,3 +249,33 @@ shipped once and cost an afternoon; that is what the check is for.
 
 
 
+
+## Releasing — and why "check for updates" lies
+
+The header's `@updateURL` points at
+`raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js`,
+and **that host serves with `cache-control: max-age=300`**. So for up to five
+minutes after a push, a fetch of the update URL still returns the *previous*
+file — Tampermonkey compares versions, sees no change, and reports nothing.
+That is not a broken update path; it is a cold CDN. Two consequences:
+
+- Right after a release, open the raw URL directly in the browser and click
+  **Update** on the install page. That bypasses the version compare entirely.
+- Give the CDN its five minutes before trusting a "check for updates" that
+  says nothing.
+
+`cdn.jsdelivr.net/gh/...@main/...` is *not* a better fallback — it caches
+branch refs on its own, longer, schedule (observed still stale a full five
+minutes after raw had caught up).
+
+Since v0.5.6 the panel header renders the version it is actually running
+(`GM_info.script.version`, with the build literal as fallback), so "did it
+update?" is answered on screen instead of by guessing.
+
+Release checklist:
+
+1. Bump `@version` **and** the `RUNNING_VERSION` literal (a test asserts they match).
+2. `cp` the file to **both** `SharedData/walkr-autobid.user.js` (what walks
+   install from) and `userscripts/walkr-autobid.user.js` (what the update URL serves).
+3. `git commit && git push`.
+4. Wait five minutes, then verify the raw URL serves the new `@version`.
