@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.7
+// @version      0.5.8
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -92,7 +92,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.5.7";
+    GM_info.script && GM_info.script.version) || "0.5.8";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -389,6 +389,10 @@
   };
 
   const RARITIES = [1, 2, 3, 4, 5, 6, 7];
+  /** How many turned-down listings the scan report will hold. A whole-market
+   * sweep looks at thousands; the interesting ones are the near-misses, and the
+   * first few dozen are enough to see the pattern. */
+  const REJECT_MAX = 25;
   const RARITY_LABEL = { 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Mystic", 7: "Iconic" };
   /** Real reports ratings as float noise (4.799999999999999) — show 2dp. */
   const fmtR = (n) => (Number.isFinite(n) ? String(Number(n.toFixed(2))) : "—");
@@ -422,18 +426,31 @@
     return c == null ? DEFAULTS.maxRpr : Number(c);
   }
 
-  /** One listing → a plan candidate, or nothing. */
-  function consider(l, sport, season, label, found) {
+  /** One listing → a plan candidate, or nothing. Every listing with a price and
+   * a rating worth reading is recorded when it is turned down, because "why
+   * didn't it buy that one?" is unanswerable a cycle later — the marketplace has
+   * moved on and the listing is gone. `rejects` is capped by the caller. */
+  function consider(l, sport, season, label, found, rejects) {
     const ends = l.endsAt ? Date.parse(l.endsAt) : NaN;
-    if (Number.isFinite(ends) && ends <= Date.now()) return;
-    if (!l.canBid) return;
-    if (l.buyNowPrice == null) return;   // no trigger price => can't start the clock
     const price = listingPrice(l);
     const rating = listingRating(l);
-    if (price == null || price <= 0 || rating == null) return;
-    const rpr = price / rating;
+    const rpr = price != null && price > 0 && rating ? price / rating : null;
+    const why = (w) => {
+      if (rejects && rejects.length < REJECT_MAX)
+        rejects.push({
+          player: label, sport, season, rarity: l.rarity, id: l.id,
+          price, rating, rpr: rpr == null ? null : Math.round(rpr * 100) / 100,
+          why: w, canBid: !!l.canBid, buyNow: l.buyNowPrice == null ? null : Number(l.buyNowPrice),
+          endsAt: l.endsAt || null,
+        });
+    };
+    if (Number.isFinite(ends) && ends <= Date.now()) return why("auction already ended");
+    if (!l.canBid) return why("canBid is false — Real won't take a bid on it");
+    if (l.buyNowPrice == null) return why("no buy-now price — there is no trigger to bid");
+    if (price == null || price <= 0) return why("no usable price on the listing");
+    if (rating == null) return why("no card value to price against");
     const cap = capFor(label);
-    if (rpr > cap) return;
+    if (rpr > cap) return why(`rpr ${rpr.toFixed(2)} is over the ${cap} ceiling`);
     if (found.some((f) => f.listingId === l.id)) return;
     found.push({
       listingId: l.id, sport, season, player: label, rarity: l.rarity,
@@ -446,6 +463,7 @@
    * with players is scoped to them; one without is a whole-market sweep. */
   async function scan(targets, log) {
     const found = [];
+    const rejects = (S.rejects = []);
     for (const t of targets) {
       if (S.stop) return found;
       const sport = SPORT_ALIAS[t.sport] || t.sport;
@@ -460,7 +478,7 @@
           try { ls = await bucketListings(sport, season, rarity, "card"); }
           catch (e) { log(`! bucket ${sport} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
-          for (const l of ls) consider(l, sport, season, listingLabel(l), found);
+          for (const l of ls) consider(l, sport, season, listingLabel(l), found, rejects);
           await sleep(gap());
         }
         continue;
@@ -479,7 +497,7 @@
           try { ls = await playerListings(sport, season, pid, rarity, "card"); }
           catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
-          for (const l of ls) consider(l, sport, season, name, found);
+          for (const l of ls) consider(l, sport, season, name, found, rejects);
           await sleep(gap());
         }
       }
@@ -753,7 +771,8 @@
     try {
       const candidates = await scan(targets, logLine);
       if (S.stop) { S.running = false; loopStop("STOP pressed"); return; }
-      logLine(`found ${candidates.length} qualifying listing(s)`);
+      logLine(`found ${candidates.length} qualifying listing(s)` +
+        (S.rejects.length ? ` · ${S.rejects.length} more priced and skipped — "Scan report" says why` : ""));
       ({ plan, spend, limitedBy } = buildPlan(candidates, loopRemaining()));
       if (plan.length) {
         logLine(`PLAN: ${plan.length} bid(s), ${spend} rax${limitedBy ? ` (cut by ${limitedBy})` : ""}`);
@@ -904,6 +923,34 @@
     let cursor = "";
     try { cursor = getComputedStyle(el).cursor === "pointer" ? " pointer" : ""; } catch (_) {}
     return `   <${el.tagName.toLowerCase()}${cls}${attrs}>${cursor ? " [pointer]" : ""} own="${own}" text="${text}"`;
+  }
+
+  /** Why the last scan did not bid on the listings it looked at. The marketplace
+   * moves, so this explains the run that just happened and nothing older — it is
+   * cleared at the start of every scan. Capped at REJECT_MAX, first-come: with a
+   * whole-market sweep the near-misses are at the front and the pattern is
+   * visible in the first few dozen. */
+  function scanReport() {
+    const rs = S.rejects || [];
+    const capped = rs.length >= REJECT_MAX ? ` (capped at ${REJECT_MAX})` : "";
+    logLine(`scan report — ${rs.length} listing(s) priced and skipped${capped}`);
+    if (!rs.length) {
+      logLine("   nothing was turned down by a rule — the scan either came back empty, or bid everything it found.");
+      return;
+    }
+    const tally = {};
+    for (const r of rs) tally[r.why] = (tally[r.why] || 0) + 1;
+    for (const [w, n] of Object.entries(tally).sort((a, b) => b[1] - a[1])) {
+      logLine(`   ${n}× ${w}`);
+    }
+    for (const r of rs) {
+      logLine(`   ${r.player} · ${SPORT_LABEL[r.sport] || r.sport} ${seasonLabel(r.sport, r.season)} · ` +
+        `${RARITY_LABEL[r.rarity] || "?"} · #${r.id}`);
+      logLine(`      ${r.price == null ? "price ?" : `${r.price} rax`} @ ` +
+        `${r.rating == null ? "rating ?" : `rating ${fmtR(r.rating)}`}` +
+        `${r.rpr == null ? "" : ` = ${fmtR(r.rpr)} rpr`} — ${r.why}`);
+      logLine(`      canBid=${r.canBid}  buyNowPrice=${r.buyNow == null ? "null" : r.buyNow}  endsAt=${r.endsAt || "n/a"}`);
+    }
   }
 
   /** Blind part of the primer: dump what is actually clickable here, so the two
@@ -1180,6 +1227,10 @@
   const S = {
     stop: false, running: false, log: [], bids: [],
     lastPlan: null, lastSpend: 0, lastAt: 0, lastLabel: "",
+    /** Listings the last scan actually looked at and chose not to bid on, with
+     * the rule that stopped each. Cleared at the start of every scan — the
+     * marketplace moves, so this only explains the run that just happened. */
+    rejects: [],
   };
 
   function logLine(s) {
@@ -1288,7 +1339,8 @@
 
       const candidates = await scan(targets, logLine);
       if (S.stop) { logLine("stopped."); return; }
-      logLine(`found ${candidates.length} qualifying listing(s)`);
+      logLine(`found ${candidates.length} qualifying listing(s)` +
+        (S.rejects.length ? ` · ${S.rejects.length} more priced and skipped — "Scan report" says why` : ""));
 
       const { plan, spend, limitedBy } = buildPlan(candidates);
       if (!plan.length) { logLine("nothing qualified — done."); S.lastPlan = null; lastBtn(); return; }
@@ -1677,6 +1729,7 @@
         render();
       }),
       btn("Primer report", () => primerReport()),
+      btn("Scan report", () => scanReport()),
     );
     loopEl = document.createElement("div");
     loopEl.style.cssText = "grid-column:1/-1;color:#9fb3d1";
