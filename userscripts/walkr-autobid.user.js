@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.5
+// @version      0.5.6
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -87,6 +87,13 @@
   "use strict";
 
   // ── config ────────────────────────────────────────────────────────────────
+  /** The version actually installed, rendered in the panel header. "Did it
+   * update?" should never be a guess: Tampermonkey's own metadata is the truth
+   * when it is available, and the literal is the fallback for the managers that
+   * hide GM_info. Bump the literal with @version on every release. */
+  const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
+    GM_info.script && GM_info.script.version) || "0.5.6";
+
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
    * — so the shipped values are kept here to compare against. */
@@ -1520,7 +1527,8 @@
 
     const head = document.createElement("div");
     head.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111c30;border-bottom:1px solid #2a3a55;cursor:move";
-    head.innerHTML = '<b style="flex:1">Walkr Autobid</b>';
+    head.innerHTML = `<b style="flex:1">Walkr Autobid</b>` +
+      `<span title="installed version — compare with the repo" style="color:#7f93b0">v${RUNNING_VERSION}</span>`;
     // STOP is the kill switch for whatever is running — a single run and an
     // armed loop both. It also clears the loop's stored state, so a reload
     // after pressing it doesn't quietly re-arm the thing.
