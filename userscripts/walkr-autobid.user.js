@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.8
+// @version      0.6.0
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -54,9 +54,12 @@
   10,000 · 2 cards bid" — and it drops card by card as the loop bids, with the
   same number appended to every BID OK line in the log.
 
-  The allowance counts rax COMMITTED, not rax spent: a bid reserves its price
-  and Real charges only if nobody outbids you in the 10-minute window. So the
-  balance can stop the loop early; it can never overshoot it.
+  The allowance counts rax COMMITTED: a bid reserves its price and Real charges
+  only if nobody outbids you in the 10-minute window. A bid that LOSES hands its
+  rax back — once the window has closed the listing is looked up again, and a
+  refund is only ever given when the page shows somebody else on top. So the
+  balance falls card by card and recovers the ones that got away; a refund can
+  free rax, never spend past the allowance.
 
   The catch is the Turnstile token: it lives ~5 minutes, and the page only
   mints one when it makes a write of its own. Any loop cadence is therefore
@@ -92,7 +95,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.5.8";
+    GM_info.script && GM_info.script.version) || "0.6.0";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -103,8 +106,8 @@
     maxRpr: SCRIPT_CAPS.maxRpr,      // rax per rating point ceiling, per card
     maxCards: SCRIPT_CAPS.maxCards,  // hard ceiling on bids in one run
     maxSpend: SCRIPT_CAPS.maxSpend,  // hard ceiling on total rax in one run
-    gapMin: 600,         // jittered politeness floor
-    gapMax: 1400,
+    gapMin: 350,         // jittered politeness floor
+    gapMax: 900,
     live: false,         // DRY RUN until you explicitly arm it
     planTtlMs: 5 * 60 * 1000,  // warn when a cached plan is older than this
   };
@@ -389,10 +392,6 @@
   };
 
   const RARITIES = [1, 2, 3, 4, 5, 6, 7];
-  /** How many turned-down listings the scan report will hold. A whole-market
-   * sweep looks at thousands; the interesting ones are the near-misses, and the
-   * first few dozen are enough to see the pattern. */
-  const REJECT_MAX = 25;
   const RARITY_LABEL = { 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Mystic", 7: "Iconic" };
   /** Real reports ratings as float noise (4.799999999999999) — show 2dp. */
   const fmtR = (n) => (Number.isFinite(n) ? String(Number(n.toFixed(2))) : "—");
@@ -426,36 +425,25 @@
     return c == null ? DEFAULTS.maxRpr : Number(c);
   }
 
-  /** One listing → a plan candidate, or nothing. Every listing with a price and
-   * a rating worth reading is recorded when it is turned down, because "why
-   * didn't it buy that one?" is unanswerable a cycle later — the marketplace has
-   * moved on and the listing is gone. `rejects` is capped by the caller. */
-  function consider(l, sport, season, label, found, rejects) {
+  /** One listing → a plan candidate, or nothing. `pid` rides along so a bid
+   * that loses its auction can be looked up again at reconciliation time. */
+  function consider(l, sport, season, label, found, pid) {
     const ends = l.endsAt ? Date.parse(l.endsAt) : NaN;
     const price = listingPrice(l);
     const rating = listingRating(l);
     const rpr = price != null && price > 0 && rating ? price / rating : null;
-    const why = (w) => {
-      if (rejects && rejects.length < REJECT_MAX)
-        rejects.push({
-          player: label, sport, season, rarity: l.rarity, id: l.id,
-          price, rating, rpr: rpr == null ? null : Math.round(rpr * 100) / 100,
-          why: w, canBid: !!l.canBid, buyNow: l.buyNowPrice == null ? null : Number(l.buyNowPrice),
-          endsAt: l.endsAt || null,
-        });
-    };
-    if (Number.isFinite(ends) && ends <= Date.now()) return why("auction already ended");
-    if (!l.canBid) return why("canBid is false — Real won't take a bid on it");
-    if (l.buyNowPrice == null) return why("no buy-now price — there is no trigger to bid");
-    if (price == null || price <= 0) return why("no usable price on the listing");
-    if (rating == null) return why("no card value to price against");
+    if (Number.isFinite(ends) && ends <= Date.now()) return;   // auction already ended
+    if (!l.canBid) return;                                     // Real won't take a bid on it
+    if (l.buyNowPrice == null) return;                         // no trigger price to bid
+    if (price == null || price <= 0) return;
+    if (rating == null) return;                                // nothing to price against
     const cap = capFor(label);
-    if (rpr > cap) return why(`rpr ${rpr.toFixed(2)} is over the ${cap} ceiling`);
+    if (rpr > cap) return;                                     // over the rax/rating ceiling
     if (found.some((f) => f.listingId === l.id)) return;
     found.push({
       listingId: l.id, sport, season, player: label, rarity: l.rarity,
-      rating, price, rpr: Math.round(rpr * 100) / 100, cap, endsAt: l.endsAt || null,
-      url: listingUrl(l.id),
+      rating, price, rpr: Math.round(rpr * 100) / 100, cap,
+      pid: pid == null ? null : pid, endsAt: l.endsAt || null, url: listingUrl(l.id),
     });
   }
 
@@ -463,7 +451,6 @@
    * with players is scoped to them; one without is a whole-market sweep. */
   async function scan(targets, log) {
     const found = [];
-    const rejects = (S.rejects = []);
     for (const t of targets) {
       if (S.stop) return found;
       const sport = SPORT_ALIAS[t.sport] || t.sport;
@@ -478,7 +465,7 @@
           try { ls = await bucketListings(sport, season, rarity, "card"); }
           catch (e) { log(`! bucket ${sport} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
-          for (const l of ls) consider(l, sport, season, listingLabel(l), found, rejects);
+          for (const l of ls) consider(l, sport, season, listingLabel(l), found, null);
           await sleep(gap());
         }
         continue;
@@ -497,7 +484,7 @@
           try { ls = await playerListings(sport, season, pid, rarity, "card"); }
           catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
-          for (const l of ls) consider(l, sport, season, name, found, rejects);
+          for (const l of ls) consider(l, sport, season, name, found, pid);
           await sleep(gap());
         }
       }
@@ -546,6 +533,13 @@
    * is why a 20-minute cadence can't simply re-fire the last token. */
   const TOKEN_FRESH_S = 240;
   const LOOP_KEY = "walkr.autobid.loop.v1";
+  /** How long a bid needs before its auction has resolved: the countdown runs
+   * 10 minutes from the moment a bid goes top, so past this the card is either
+   * won (rax charged) or lost (rax free). */
+  const RECONCILE_MS = 11 * 60 * 1000;
+  /** How many cycles a still-live bid is re-checked before it is left alone —
+   * the auction resolved somewhere we can't read, so the rax stays spent. */
+  const RECONCILE_MAX_CHECKS = 4;
 
   /** The priming click — the fragile half, and it matches TEXT only. Real's app
    * is React Native Web: a live report on a card page found ZERO <button>, <a>
@@ -595,6 +589,10 @@
     committed: 0,
     /** Cards the loop has bid on — the count that ticks the balance down. */
     cards: 0,
+    /** Bids whose 10-minute window is still open. Each holds its rax until the
+     * listing is looked at again: outbid hands the rax back, anything else keeps
+     * it spent. Reset allowance clears this too. */
+    pending: [],
     cycles: 0,
     consecFails: 0,
     startedAt: 0,
@@ -615,7 +613,7 @@
         live: DEFAULTS.live,
         allowance: LOOP.allowance,
         presetIds: LOOP.presetIds,
-        committed: LOOP.committed, cards: LOOP.cards,
+        committed: LOOP.committed, cards: LOOP.cards, pending: LOOP.pending,
         cycles: LOOP.cycles, consecFails: LOOP.consecFails,
         startedAt: LOOP.startedAt, lastRunAt: LOOP.lastRunAt, nextAt: LOOP.nextAt,
         phase: LOOP.phase, plan: LOOP.plan,
@@ -646,16 +644,20 @@
   function loopStatus() {
     const left = loopRemaining();
     const bid = `${fmtRax(LOOP.committed)} rax / ${LOOP.cards} card${LOOP.cards === 1 ? "" : "s"} bid`;
+    // Bids still inside their 10-minute window count against the balance, but
+    // it is worth seeing how much of it is only provisionally spent.
+    const pend = LOOP.pending.length
+      ? ` · ${LOOP.pending.length} awaiting the 10-min window` : "";
     if (!LOOP.on) {
       return LOOP.committed
-        ? `loop: off · ${fmtRax(left)} rax left of ${fmtRax(LOOP.allowance)} · ${bid}`
+        ? `loop: off · ${fmtRax(left)} rax left of ${fmtRax(LOOP.allowance)} · ${bid}${pend}`
         : `loop: off · allowance ${fmtRax(LOOP.allowance)} rax`;
     }
     const next = LOOP.nextAt ? LOOP.nextAt - Date.now() : null;
     return `loop: ON · ${fmtRax(left)} rax left of ${fmtRax(LOOP.allowance)} · ${bid} · ` +
       `every ${LOOP.intervalMin}\u2013${LOOP.intervalMax} min · cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}` +
       (next != null && next > 0 ? ` · next in ${Math.max(1, Math.ceil(next / 60000))} min` : "") +
-      (LOOP.phase === "prime" ? " · priming a token" : "");
+      (LOOP.phase === "prime" ? " · priming a token" : "") + pend;
   }
 
   function loopStop(reason) {
@@ -700,16 +702,78 @@
     return null;
   }
 
-  /** A placed bid reserves its price, win or lose (Real charges only winners),
-   * and the balance is debited and repainted as each card lands — so the panel
-   * ticks down card by card while a plan is firing. */
-  async function executePlanLoop(plan) {
-    const r = (await executePlan(plan, logLine, (p) => {
-      LOOP.committed += Number(p.price) || 0;
-      LOOP.cards += 1;
+  /** Book one bid against the allowance, win or lose — and remember it, so the
+   * rax can come back if somebody outbids it. Keyed by listing id: the primer's
+   * click and the API bid that follows can hit the same card, and one card is
+   * one reservation. */
+  function loopCommit(card) {
+    const id = card && card.listingId;
+    if (id == null) return;
+    if (LOOP.pending.some((p) => p.listingId === id)) return;
+    const price = Number(card.price) || 0;
+    LOOP.committed += price;
+    LOOP.cards += 1;
+    LOOP.pending.push({
+      listingId: id, price, at: Date.now(), checks: 0,
+      sport: card.sport, season: card.season, rarity: card.rarity,
+      player: card.player, pid: card.pid == null ? null : card.pid,
+    });
+    saveLoop();
+    render();
+  }
+
+  /** The allowance is a reservation, not a bill: Real only charges a winner, and
+   * a winner is a bid nobody outbid inside 10 minutes. So once a bid is older
+   * than that, look its listing up again — gone means the auction resolved and
+   * the rax stays spent; still listed with a HIGHER current bid means somebody
+   * beat us to it and the rax goes back on the balance.
+   *
+   * A refund can only ever free rax, so the run can never outspend the
+   * allowance: the only thing that releases a reservation is Real's own listing
+   * page saying somebody else is on top. Anything unreadable keeps its rax. */
+  async function loopReconcile(log) {
+    if (!LOOP.pending.length) return;
+    const due = LOOP.pending.filter((p) => Date.now() - p.at >= RECONCILE_MS);
+    if (!due.length) return;
+    for (const p of due) {
+      if (S.stop) return;
+      p.checks = (p.checks || 0) + 1;
+      let list = [];
+      try {
+        list = p.pid != null
+          ? await playerListings(p.sport, p.season, p.pid, p.rarity, "card")
+          : await bucketListings(p.sport, p.season, p.rarity, "card");
+      } catch (e) {
+        log(`reconcile #${p.listingId}: ${e.message} — its ${fmtRax(p.price)} rax stay reserved.`);
+        continue;
+      }
+      const l = list.find((x) => x.id === p.listingId);
+      const top = l ? Number(l.currentBidAmount || 0) || 0 : 0;
+      const outbid = !!l && (top > p.price || l.isTopBidder === false || l.userIsTopBidder === false);
+      const drop = (why) => { LOOP.pending = LOOP.pending.filter((x) => x.listingId !== p.listingId); log(why); };
+      if (!l) {
+        drop(`reconcile #${p.listingId} (${p.player}): the listing is gone, so the auction resolved — ` +
+          `${fmtRax(p.price)} rax stay spent.`);
+      } else if (outbid) {
+        LOOP.committed = Math.max(0, LOOP.committed - p.price);
+        LOOP.cards = Math.max(0, LOOP.cards - 1);
+        drop(`↩ outbid on #${p.listingId} (${p.player})${top ? ` at ${fmtRax(top)} rax` : ""} — ` +
+          `${fmtRax(p.price)} rax back on the allowance: ${fmtRax(loopRemaining())} left.`);
+      } else if (p.checks >= RECONCILE_MAX_CHECKS) {
+        drop(`#${p.listingId} (${p.player}) is still listed and unreconciled after ` +
+          `${p.checks} checks — leaving its ${fmtRax(p.price)} rax reserved.`);
+      }
       saveLoop();
       render();
-    })) || { placed: 0, committed: 0, failed: 0 };
+      await sleep(gap());
+    }
+  }
+
+  /** A placed bid reserves its price (Real charges only winners), and the
+   * balance is debited and repainted as each card lands — so the panel ticks
+   * down card by card while a plan is firing. */
+  async function executePlanLoop(plan) {
+    const r = (await executePlan(plan, logLine, (p) => loopCommit(p))) || { placed: 0, committed: 0, failed: 0 };
     render();
     return r;
   }
@@ -725,13 +789,29 @@
   }
 
   async function loopCycle() {
-    const why = loopBoundHit();
-    if (why) { if (why !== "disarmed") loopStop(why); return; }
+    if (!LOOP.on) return;
     if (S.running) {
       logLine("loop: a run is already in progress — checking again in a minute.");
       loopSchedule(60000);
       return;
     }
+    // Reconcile before spending anything: a bid that lost its auction hands its
+    // rax back, and that can be the difference between "allowance left" and
+    // "the allowance is gone".
+    await loopReconcile(logLine);
+    const why = loopBoundHit();
+    if (why === "disarmed") return;
+    // A fully-committed allowance is only the end once nothing is still inside
+    // its 10-minute window: a pending bid that gets outbid hands its rax back.
+    if (why && /^allowance committed/.test(why) && LOOP.pending.length) {
+      const wait = loopWaitMs();
+      logLine(`loop: allowance fully committed (${fmtRax(LOOP.committed)} of ${fmtRax(LOOP.allowance)} rax), ` +
+        `but ${LOOP.pending.length} bid(s) are still inside their 10-minute window — looking again in ` +
+        `${Math.round(wait / 60000)} min, in case one is outbid and hands its rax back.`);
+      loopSchedule(wait);
+      return;
+    }
+    if (why) { loopStop(why); return; }
 
     LOOP.cycles++;
     LOOP.lastRunAt = Date.now();
@@ -771,8 +851,7 @@
     try {
       const candidates = await scan(targets, logLine);
       if (S.stop) { S.running = false; loopStop("STOP pressed"); return; }
-      logLine(`found ${candidates.length} qualifying listing(s)` +
-        (S.rejects.length ? ` · ${S.rejects.length} more priced and skipped — "Scan report" says why` : ""));
+      logLine(`found ${candidates.length} qualifying listing(s)`);
       ({ plan, spend, limitedBy } = buildPlan(candidates, loopRemaining()));
       if (plan.length) {
         logLine(`PLAN: ${plan.length} bid(s), ${spend} rax${limitedBy ? ` (cut by ${limitedBy})` : ""}`);
@@ -925,34 +1004,6 @@
     return `   <${el.tagName.toLowerCase()}${cls}${attrs}>${cursor ? " [pointer]" : ""} own="${own}" text="${text}"`;
   }
 
-  /** Why the last scan did not bid on the listings it looked at. The marketplace
-   * moves, so this explains the run that just happened and nothing older — it is
-   * cleared at the start of every scan. Capped at REJECT_MAX, first-come: with a
-   * whole-market sweep the near-misses are at the front and the pattern is
-   * visible in the first few dozen. */
-  function scanReport() {
-    const rs = S.rejects || [];
-    const capped = rs.length >= REJECT_MAX ? ` (capped at ${REJECT_MAX})` : "";
-    logLine(`scan report — ${rs.length} listing(s) priced and skipped${capped}`);
-    if (!rs.length) {
-      logLine("   nothing was turned down by a rule — the scan either came back empty, or bid everything it found.");
-      return;
-    }
-    const tally = {};
-    for (const r of rs) tally[r.why] = (tally[r.why] || 0) + 1;
-    for (const [w, n] of Object.entries(tally).sort((a, b) => b[1] - a[1])) {
-      logLine(`   ${n}× ${w}`);
-    }
-    for (const r of rs) {
-      logLine(`   ${r.player} · ${SPORT_LABEL[r.sport] || r.sport} ${seasonLabel(r.sport, r.season)} · ` +
-        `${RARITY_LABEL[r.rarity] || "?"} · #${r.id}`);
-      logLine(`      ${r.price == null ? "price ?" : `${r.price} rax`} @ ` +
-        `${r.rating == null ? "rating ?" : `rating ${fmtR(r.rating)}`}` +
-        `${r.rpr == null ? "" : ` = ${fmtR(r.rpr)} rpr`} — ${r.why}`);
-      logLine(`      canBid=${r.canBid}  buyNowPrice=${r.buyNow == null ? "null" : r.buyNow}  endsAt=${r.endsAt || "n/a"}`);
-    }
-  }
-
   /** Blind part of the primer: dump what is actually clickable here, so the two
    * text patterns can be corrected against the real page. Three passes, because
    * the listing page turns out to use none of the obvious markup — no <button>,
@@ -1078,9 +1129,9 @@
    * click minted. */
   async function primerTail(plan, card, minted) {
     if (minted) {
-      LOOP.committed += Number(card.price) || 0;
-      LOOP.cards += 1;
-      saveLoop();
+      // The page's own click placed that bid itself — book it against the same
+      // allowance, so the balance is honest about what has been spent.
+      loopCommit(card);
       logLine(`primer: the page placed #${card.listingId} (${card.player}, ${card.price} rax) and minted a fresh token ` +
         `— ${fmtRax(loopRemaining())} rax left of the allowance.`);
     } else {
@@ -1099,7 +1150,13 @@
       loopEndCycle(true);
       return;
     }
-    const rest = plan.slice(1);
+    // The WHOLE plan, card 0 included. The click above is supposed to have
+    // placed card 0 itself, but if it landed on something that minted a token
+    // without bidding, this bid is the repair — and when the click did bid,
+    // Real answers a duplicate at the same price with "minimum bid", which is
+    // one of the ordinary skips. Either way the card is charged once:
+    // loopCommit keys reservations by listing id.
+    const rest = plan;
     if (!rest.length) { loopEndCycle(false); return; }
     const r = await executePlanLoop(rest);
     loopEndCycle(!!r.failed);
@@ -1138,7 +1195,10 @@
     }
     if (S.running) { logLine("loop: a run is already in progress — wait for it to finish."); return; }
     if (!DEFAULTS.live) logLine("loop: LIVE is off, so every cycle is a dry run for now.");
-    if (loopRemaining() <= 0) {
+    // A spent allowance refuses to arm — unless there are bids still inside
+    // their 10-minute window, because those can hand their rax back on the
+    // first cycle's reconciliation.
+    if (loopRemaining() <= 0 && !LOOP.pending.length) {
       logLine("loop: the allowance is already committed — hit Reset allowance first.");
       return;
     }
@@ -1178,6 +1238,7 @@
     LOOP.allowance = Number(st.allowance) || LOOP_CAPS.defaultAllowance;
     LOOP.committed = Number(st.committed) || 0;
     LOOP.cards = Number(st.cards) || 0;
+    LOOP.pending = Array.isArray(st.pending) ? st.pending : [];
     LOOP.cycles = Number(st.cycles) || 0;
     LOOP.consecFails = Number(st.consecFails) || 0;
     LOOP.startedAt = Number(st.startedAt) || 0;
@@ -1227,10 +1288,6 @@
   const S = {
     stop: false, running: false, log: [], bids: [],
     lastPlan: null, lastSpend: 0, lastAt: 0, lastLabel: "",
-    /** Listings the last scan actually looked at and chose not to bid on, with
-     * the rule that stopped each. Cleared at the start of every scan — the
-     * marketplace moves, so this only explains the run that just happened. */
-    rejects: [],
   };
 
   function logLine(s) {
@@ -1339,8 +1396,7 @@
 
       const candidates = await scan(targets, logLine);
       if (S.stop) { logLine("stopped."); return; }
-      logLine(`found ${candidates.length} qualifying listing(s)` +
-        (S.rejects.length ? ` · ${S.rejects.length} more priced and skipped — "Scan report" says why` : ""));
+      logLine(`found ${candidates.length} qualifying listing(s)`);
 
       const { plan, spend, limitedBy } = buildPlan(candidates);
       if (!plan.length) { logLine("nothing qualified — done."); S.lastPlan = null; lastBtn(); return; }
@@ -1401,24 +1457,28 @@
     }
   } catch (_) { hashPlan = null; }
 
-  /** Every preset the Quick Search has selected, in menu order. The control is a
-   * multi-select so one loop can run more than one lineup off the same
-   * allowance — Optimal Setup · NBA and · NHL together, for instance. Note that
-   * `quickEl.value` only ever reports the FIRST selected option, which is why
-   * everything downstream asks here instead. */
+  /** The lineups this run carries, in menu order. The dropdown ADDS one at a
+   * time and each pick becomes a bubble, so a loop can carry several off the one
+   * allowance (Optimal Setup · NHL + · NBA + · CBB, say). Nothing reads
+   * `quickEl.value` — this list is the single source of truth. */
+  let selectedIds = [];
   function selectedPresets() {
-    if (!quickEl) return [];
-    const ids = new Set(
-      Array.from(quickEl.selectedOptions || []).map((o) => o.value).filter(Boolean)
-    );
-    return PRESETS.filter((p) => ids.has(p.id));
+    return PRESETS.filter((p) => selectedIds.includes(p.id));
   }
 
   /** Select exactly these preset ids and nothing else. */
   function setSelectedPresets(ids) {
-    if (!quickEl) return;
     const want = new Set(ids || []);
-    for (const o of Array.from(quickEl.options)) o.selected = want.has(o.value);
+    selectedIds = PRESETS.filter((p) => want.has(p.id)).map((p) => p.id);
+    if (quickEl) quickEl.value = "";
+    renderPresetChips();
+  }
+
+  /** Add one lineup to the run (a no-op if it is already in it), keeping the
+   * list in menu order so the label always reads the same way. */
+  function addPreset(id) {
+    if (id && !selectedIds.includes(id)) selectedIds.push(id);
+    setSelectedPresets(selectedIds);
   }
 
   function currentLabel() {
@@ -1514,8 +1574,52 @@
     return sports.map((s) => ({ sport: s, season: SEASON[s], players }));
   }
 
-  /** Rebuild the chip row. × drops a player for this run; the chip greys out and
-   * its × becomes ↺, so a misclick is one click back. */
+  /** The chosen lineups as bubbles — one × each, so a lineup is added and taken
+   * back out in the same place. */
+  function renderPresetChips() {
+    if (!presetChipsEl) return;
+    presetChipsEl.textContent = "";
+    const ps = selectedPresets();
+    if (!ps.length) { presetChipsEl.style.display = "none"; return; }
+    presetChipsEl.style.display = "flex";
+    for (const p of ps) {
+      const chip = document.createElement("span");
+      chip.style.cssText = "display:inline-flex;align-items:center;gap:3px;padding:1px 2px 1px 8px;" +
+        "border-radius:999px;border:1px solid #3a5a8a;background:#152744;color:#dbe9ff";
+      const nm = document.createElement("span");
+      nm.textContent = p.label;
+      const x = document.createElement("button");
+      x.type = "button";
+      x.textContent = "\u00d7";
+      x.title = `take ${p.label} out of this run`;
+      x.setAttribute("aria-label", `remove ${p.label}`);
+      x.style.cssText =
+        "background:none;border:0;color:inherit;cursor:pointer;font:inherit;padding:0 4px;line-height:1.1";
+      x.onclick = () => {
+        excluded.clear();
+        setSelectedPresets(selectedIds.filter((id) => id !== p.id));
+        applySelection();
+      };
+      chip.append(nm, x);
+      presetChipsEl.appendChild(chip);
+    }
+  }
+
+  /** A chosen lineup sets the sport and parks the players box — the lineup
+   * carries its own players. The manual fields come back when nothing is
+   * chosen. */
+  function applySelection() {
+    const ps = selectedPresets();
+    if (ps.length) { sportEl.value = ps[0].sport; playersEl.value = ""; playersEl.disabled = true; }
+    else { playersEl.disabled = false; }
+    render();
+  }
+
+  /** Rebuild the chip row: a muted tag per sport/season, then that slice's
+   * players. × drops a player for this run; the chip greys out and its × becomes
+   * ↺, so a misclick is one click back. The chips are deliberately small — the
+   * sport/season lives in the slice tag and the tooltip, so a whole lineup takes
+   * a couple of lines instead of a screen. */
   function renderChips() {
     if (!chipsEl) return;
     chipsEl.textContent = "";
@@ -1527,24 +1631,26 @@
     chipsEl.style.display = "flex";
     let removed = 0;
     for (const s of src) {
+      const tag = document.createElement("span");
+      tag.textContent = `${SPORT_LABEL[s.sport] || s.sport} ${seasonLabel(s.sport, s.season)}`;
+      tag.style.cssText = "color:#7f93b0;font-size:11px;padding:2px 1px 2px 3px";
+      chipsEl.appendChild(tag);
       for (const name of s.players || []) {
         const key = playerKey(s.sport, s.season, name);
         const gone = excluded.has(key);
         if (gone) removed++;
         const chip = document.createElement("span");
         chip.style.cssText = [
-          "display:inline-flex", "align-items:center", "gap:5px",
-          "padding:2px 3px 2px 8px", "border-radius:999px",
+          "display:inline-flex", "align-items:center", "gap:2px",
+          "padding:1px 2px 1px 7px", "border-radius:999px",
           `border:1px solid ${gone ? "#33415a" : "#2f4a72"}`,
           `background:${gone ? "#141c2b" : "#122036"}`,
           `color:${gone ? "#63748f" : "#cfe0f7"}`,
           gone ? "text-decoration:line-through" : "",
         ].filter(Boolean).join(";");
+        chip.title = `${name} · ${SPORT_LABEL[s.sport] || s.sport} ${seasonLabel(s.sport, s.season)}`;
         const nm = document.createElement("span");
         nm.textContent = name;
-        const ctx = document.createElement("span");
-        ctx.textContent = `${SPORT_LABEL[s.sport] || s.sport} ${seasonLabel(s.sport, s.season)}`;
-        ctx.style.cssText = "color:#7f93b0;font-size:11px";
         const x = document.createElement("button");
         x.type = "button";
         x.textContent = gone ? "\u21ba" : "\u00d7";
@@ -1560,7 +1666,7 @@
           renderChips();
           render();
         };
-        chip.append(nm, ctx, x);
+        chip.append(nm, x);
         chipsEl.appendChild(chip);
       }
     }
@@ -1579,7 +1685,7 @@
   }
 
   // ── UI ───────────────────────────────────────────────────────────────────
-  let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, lastBtnEl;
+  let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, presetChipsEl, lastBtnEl;
   let intervalEl, intervalMaxEl, allowanceEl, primerEl, loopEl, loopBtnEl;
   /** boot() runs two or three times (readyState, DOMContentLoaded, load) — the
    * loop must only be resumed once, or every pass would arm another timer. */
@@ -1624,18 +1730,36 @@
     }, "background:#c0392b;color:#fff;font-weight:700;"));
     makeDraggable(panel, head);
 
+    /** Two panes behind a tab strip. The search is the thing that changes
+     * between runs and the loop is a set-once thing; side by side they made the
+     * panel noisy, so they live on their own tabs. The strip sits inside the
+     * same scrolling block as the panes, so the log still gets the slack. */
     const cfg = document.createElement("div");
-    cfg.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3a55;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center;flex:0 1 auto;min-height:0;overflow:auto";
+    cfg.style.cssText = "border-bottom:1px solid #2a3a55;flex:0 1 auto;min-height:0;overflow:auto";
+    const paneCss = "padding:8px 10px;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center";
+    const paneSetup = document.createElement("div");
+    paneSetup.style.cssText = paneCss;
+    const paneLoop = document.createElement("div");
+    paneLoop.style.cssText = paneCss + ";display:none";
+    const tab = (label, mine, other) =>
+      btn(label, () => {
+        const show = mine.style.display === "none";
+        mine.style.display = show ? "grid" : "none";
+        other.style.display = show ? "none" : "grid";
+        render();
+      }, "padding:3px 10px;");
+    const tabBar = document.createElement("div");
+    tabBar.style.cssText = "display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid #2a3a55;background:#0e1728";
+    tabBar.append(tab("Search", paneSetup, paneLoop), tab("Loop", paneLoop, paneSetup));
 
     quickEl = document.createElement("select");
-    // Multi-select: one loop can carry two lineups (Optimal Setup · NBA and · NHL)
-    // off a single allowance. Plain click picks one; ctrl/cmd-click adds another.
-    quickEl.multiple = true;
-    quickEl.size = 4;
-    quickEl.title = "plain click = one lineup · ctrl/cmd-click = add another to the same run";
-    quickEl.appendChild(opt("", "— none —"));
+    // A single dropdown that ADDS: pick a lineup and it becomes a bubble below,
+    // pick another and both run off the one allowance. (The old
+    // <select multiple> needed ctrl-click and reported only its first value.)
+    quickEl.title = "pick a lineup to add it to this run — each one becomes a bubble underneath";
+    quickEl.appendChild(opt("", "— add a lineup —"));
     for (const p of PRESETS) quickEl.appendChild(opt(p.id, p.label));
-    quickEl.style.cssText = selCss() + "height:auto;min-height:66px;";
+    quickEl.style.cssText = selCss() + "width:100%;";
 
     sportEl = document.createElement("select");
     sportEl.appendChild(opt("all", "all"));
@@ -1650,6 +1774,11 @@
      * player removable for this run. Hidden while typing players by hand. */
     chipsEl = document.createElement("div");
     chipsEl.style.cssText =
+      "grid-column:1/-1;display:none;flex-wrap:wrap;gap:4px;align-items:center;margin:1px 0 2px";
+
+    /** The lineups this run carries, as bubbles — the × takes one back out. */
+    presetChipsEl = document.createElement("div");
+    presetChipsEl.style.cssText =
       "grid-column:1/-1;display:none;flex-wrap:wrap;gap:4px;align-items:center;margin:1px 0 2px";
 
     capsEl = document.createElement("div");
@@ -1718,35 +1847,40 @@
     primerLbl.append(primerEl, document.createTextNode("primer"));
     loopBtnEl = btn("Arm loop", () => loopArm(), "background:#26364f;color:#dce8f8;");
     loopRow.append(
-      labeled("every"), intervalEl, labeled("\u2013"), intervalMaxEl, labeled("min \u00b7"),
+      labeled("every"), intervalEl, labeled("\u2013"), intervalMaxEl, labeled("min \u00b7 "),
       labeled("allowance"), allowanceEl, labeled("rax"),
       primerLbl, loopBtnEl,
       btn("Reset allowance", () => {
         LOOP.committed = 0;
         LOOP.cards = 0;
+        LOOP.pending = [];
         saveLoop();
         logLine(`loop: allowance reset — ${fmtRax(LOOP.allowance)} rax available again, 0 cards bid.`);
         render();
       }),
       btn("Primer report", () => primerReport()),
-      btn("Scan report", () => scanReport()),
     );
     loopEl = document.createElement("div");
     loopEl.style.cssText = "grid-column:1/-1;color:#9fb3d1";
 
-    cfg.append(labeled("Quick Search"), quickEl, labeled("Sport"), sportEl, labeled("Players"), playersEl,
-      chipsEl, capsEl, liveEl, loopRow, loopEl);
+    const loopNote = document.createElement("div");
+    loopNote.style.cssText = "grid-column:1/-1;color:#7f93b0";
+    loopNote.textContent =
+      "Runs the chosen lineups on a timer off one rax allowance. A bid that somebody outbids hands its " +
+      "rax back once its 10-minute window has closed. Hard stops: allowance \u00b7 72 cycles \u00b7 24 h \u00b7 3 failed cycles \u00b7 STOP.";
+
+    cfg.append(tabBar, paneSetup, paneLoop);
+    paneSetup.append(labeled("Quick Search"), quickEl, presetChipsEl,
+      labeled("Sport"), sportEl, labeled("Players"), playersEl, chipsEl, capsEl, liveEl);
+    paneLoop.append(loopNote, loopRow, loopEl);
 
     quickEl.onchange = () => {
       hashPlan = null;   // a manual pick overrides a menu handoff
-      excluded.clear();  // picking a Quick Search restores every player it lists
-      const ps = selectedPresets();
-      // Picking a preset sets its sport (Low PerRax and All Sports are multi-sport,
-      // so those show "all"). The preset carries its own players, so the box is
-      // cleared and parked.
-      if (ps.length) { sportEl.value = ps[0].sport; playersEl.value = ""; playersEl.disabled = true; }
-      else { playersEl.disabled = false; }
-      render();
+      excluded.clear();  // picking a lineup restores every player it lists
+      const pick = quickEl.value;
+      quickEl.value = "";            // the dropdown adds, it does not hold a value
+      if (pick) addPreset(pick);
+      applySelection();
     };
     sportEl.onchange = () => { hashPlan = null; setSelectedPresets([]); excluded.clear(); playersEl.disabled = false; render(); };
     playersEl.oninput = () => { if (playersEl.value.trim()) { hashPlan = null; setSelectedPresets([]); excluded.clear(); } render(); };
@@ -1785,7 +1919,7 @@
     mount(panel);
     if (hashPlan && hashPlan.label) {
       const match = PRESETS.find((p) => p.label === hashPlan.label);
-      if (match) { quickEl.value = match.id; sportEl.value = match.sport; }
+      if (match) { setSelectedPresets([match.id]); sportEl.value = match.sport; playersEl.disabled = true; }
     }
     lastBtn();
     render();
@@ -1914,6 +2048,7 @@
     if (!panel || !panel.isConnected) return;
     DEFAULTS.maxRpr = effectiveMaxRpr();
     renderChips();
+    renderPresetChips();
     const age = S.lastAt ? Math.round((Date.now() - S.lastAt) / 1000) : null;
     statusEl.textContent =
       `maxRpr ${DEFAULTS.maxRpr} · maxCards ${DEFAULTS.maxCards} · maxSpend ${DEFAULTS.maxSpend} rax\n` +

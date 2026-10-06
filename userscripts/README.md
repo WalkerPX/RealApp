@@ -103,12 +103,22 @@ Then **Bid these N (X rax)** fires *that cached plan* — no second scan. A plan
 older than 5 minutes warns first, because listings turn over.
 
 Picking a Quick Search fills a **row of player bubbles under "Players"** — the
-lineup it is about to search, one chip per player with a sport/season tag. The
-**×** drops that player for this run only (the chip greys out and its × becomes
-**↺** to undo, plus a *restore all* button). Picking a Quick Search again — or
-touching Sport/Players — clears every exclusion, so the preset is never edited.
-A slice whose players are all dropped disappears entirely rather than falling
-back to a whole-market sweep.
+lineup it is about to search, grouped by a muted sport/season tag, several chips
+to the line. The player chip's **×** drops that player for this run only (the
+chip greys out and its × becomes **↺** to undo, plus a *restore all* button).
+Choosing a lineup — or touching Sport/Players — clears every exclusion, so the
+preset is never edited. A slice whose players are all dropped disappears
+entirely rather than falling back to a whole-market sweep.
+
+The panel is split into two tabs: **Search** (Quick Search, Sport, Players) and
+**Loop** (the cadence, the allowance and the primer). The search is the part that
+changes between runs; the loop is a set-once thing, and side by side they made
+the panel noisy.
+
+**Quick Search is a dropdown that adds.** Pick a lineup and it becomes a bubble
+under the dropdown; pick another and both run off the one allowance. Each bubble
+carries its own **×**, so a lineup is added and taken back out in the same place,
+and `selectedPresets()` keeps the chosen ids in menu order.
 
 A bid at the trigger price starts a 10-minute countdown; nobody outbids you and
 the card is yours. Bids are **not** deduped — duplicates, repeat players and low
@@ -179,10 +189,37 @@ the stored state, so a reload after STOP can't re-arm it).
 
 The panel shows the allowance as a running **balance** — `9,760 rax left of
 10,000 · 2 cards bid` — which drops card by card as the loop bids, and the same
-number is appended to every `BID OK` line. It tracks rax **committed**, not
-spent: a bid reserves its price and Real charges only the winners, so the
-balance can stop the loop early but can never overshoot it. The per-run rails
-stay: ≤50 cards and ≤1000 rax a cycle, with the allowance sitting above them.
+number is appended to every `BID OK` line. It tracks rax **committed**: a bid
+reserves its price and Real charges only the winners. The per-run rails stay:
+≤50 cards and ≤1000 rax a cycle, with the allowance sitting above them.
+
+A bid that **loses** hands its rax back. Every bid is remembered with its
+listing's sport/season/rarity/player, and once its 10-minute window has closed
+`loopReconcile()` asks the marketplace for that listing again — the check runs at
+the top of each cycle, before anything is spent:
+
+- still listed with a **higher** current bid → somebody beat us: the rax goes
+  back on the balance and the log says `↩ outbid on #id (player) at N rax — 120
+  rax back on the allowance`.
+- **gone** → the auction resolved (won, or sold to somebody else) and the rax
+  stays spent.
+- **anything unreadable** → stays spent. The refund is deliberately one-way: the
+  only thing that releases a reservation is Real's own listing saying somebody
+  else is on top, so the balance can be freed but can never overshoot the
+  allowance.
+
+A fully-committed allowance therefore **waits** rather than stopping while bids
+are still inside their 10-minute window — the loop keeps its cadence and says
+why, so a refund can revive it, and only stops once nothing is outstanding.
+
+### How fast it reads
+
+Reads are paced **350–900 ms apart**, jittered (`gap()`), never a metronome. A
+scan is `players × (1 resolve + 7 rarity buckets)`, so one Optimal Setup lineup
+(~5 players) is ~40 GETs and three of them ~150 — a couple of minutes a cycle.
+Writes are paced separately by `bidGap()` (~1.6 s average, with the odd longer
+pause) because the writes are the requests that matter. Turn `gapMin`/`gapMax`
+back up in `DEFAULTS` if Real ever pushes back on the reads.
 
 Bids need a page-minted Turnstile token (~5 min TTL, and the page only mints one
 when it makes a write of its own), so any loop cadence carries a stale token —
@@ -217,12 +254,14 @@ every leaf mentioning buy/bid/offer/rax — that is what to send if the primer l
 `no bid control found`.
 
 Three jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
-loop, `primer.cjs` for the primer): dry-run plans and spends nothing, a small
-allowance refuses to bid, LIVE bids at the buy-now price and debits the balance
-card by card, a spent allowance refuses to re-arm, the cadence lands inside
-`[min, max]`, and the primer finds/clicks a div-based `Buy Now` **before** a
-second-ranked `Bid`, exactly once, while ignoring a non-matching pointer div and
-its own panel.
+loop, `primer.cjs` for the primer, `reconcile.cjs` for the allowance): dry-run
+plans and spends nothing, a small allowance refuses to bid, LIVE bids at the
+buy-now price and debits the balance card by card, a fully-committed allowance
+stops spending but keeps watching while a bid is still inside its window, the
+cadence lands inside `[min, max]`, an aged bid that was **outbid** refunds its
+rax while one whose listing **vanished** stays spent, and the primer
+finds/clicks a div-based `Buy Now` **before** a second-ranked `Bid`, exactly
+once, while ignoring a non-matching pointer div and its own panel.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
 preset's id and the next-cycle timestamp — the primer reloads the page, and
@@ -230,17 +269,20 @@ without the preset id the cycle after the reload would fall back to a
 whole-market sweep. The tab must stay open on realapp.com; background timers
 throttle, so a cycle can start late, never early.
 
-### Two lineups at once — the Quick Search is a multi-select
+### Several lineups at once — the Quick Search adds a bubble per pick
 
-Since v0.5.7 the Quick Search is a `<select multiple>`: plain-click picks one
-lineup, ctrl/cmd-click adds another, and a loop runs **all** of them off the one
-allowance. `Optimal Setup · NHL` for tonight plus `Optimal Setup · NBA` queued
-for when the season opens is a normal thing to arm.
+Since v0.6.0 the Quick Search is a **single `<select>` that adds**: pick a
+lineup, it becomes a bubble, and a loop runs **all** of the chosen lineups off
+the one allowance. `Optimal Setup · NHL` for tonight plus `Optimal Setup · NBA`
+and `· CBB` is a normal thing to arm. (v0.5.7 shipped a `<select multiple>`; a
+ctrl-click requirement plus a list box that reported only its first value turned
+out to be worse than one click, so the multi-select is gone.)
 
-The subtlety that made this more than a one-line change: on a multi-select,
-`quickEl.value` only ever reports the *first* selected option, and about six
-places read it. They all go through `selectedPresets()` now, which is the single
-place that asks.
+The subtlety that made this more than a one-line change: six or seven places
+used to read `quickEl.value`, which on a multi-select only ever reports the
+*first* selected option. They all go through `selectedPresets()` now, which reads
+`selectedIds` — the single place that knows, and the only thing the bubbles and
+the loop state are keyed on.
 
 Two rules the merge follows:
 
