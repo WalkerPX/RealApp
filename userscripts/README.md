@@ -230,6 +230,32 @@ without the preset id the cycle after the reload would fall back to a
 whole-market sweep. The tab must stay open on realapp.com; background timers
 throttle, so a cycle can start late, never early.
 
+### Two lineups at once — the Quick Search is a multi-select
+
+Since v0.5.7 the Quick Search is a `<select multiple>`: plain-click picks one
+lineup, ctrl/cmd-click adds another, and a loop runs **all** of them off the one
+allowance. `Optimal Setup · NHL` for tonight plus `Optimal Setup · NBA` queued
+for when the season opens is a normal thing to arm.
+
+The subtlety that made this more than a one-line change: on a multi-select,
+`quickEl.value` only ever reports the *first* selected option, and about six
+places read it. They all go through `selectedPresets()` now, which is the single
+place that asks.
+
+Two rules the merge follows:
+
+- **The rax/rating ceiling is inherited only when every selected lineup declares
+  one.** `Optimal Setup` ships 21, `Low PerRax` ships nothing — pairing them runs
+  at the shipped 11, so adding a second lineup can never leave a loosened
+  ceiling behind on one that never asked for it.
+- **The loop stores `presetIds`, and resumes on all-or-none.** If a lineup it
+  was armed on has left the build, it disarms with a message rather than
+  quietly bidding a different set of cards than the one that was chosen. Older
+  saved state with a single `presetId` is read as a one-item list.
+
+Labels are joined in **menu order**, not click order, so the same two lineups
+read the same way every time.
+
 ### The 401 that wasn't an auth problem
 
 Real answers **401 "Malformed request."** for a bad `real-request-token` — the
