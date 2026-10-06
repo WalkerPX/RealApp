@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.1
+// @version      0.5.2
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -528,10 +528,10 @@
     findWaitMs: 12000,
     settleMs: 9000,
     /** Where the primer navigates when the target listing is NOT already on the
-     * page. This is the one guess in the loop: Real's share routes are hashids
-     * over a tuple, and a listing's tuple is not documented anywhere public. It
-     * is logged before navigating, so compare it against a listing URL copied
-     * out of the address bar and correct the tuple here if it 404s. */
+     * page. VERIFIED 2026-10-05 against listing 1454281451: the encoded tuple
+     * renders realapp.com/VVtaFVFra9A1D, titled "Marketplace Listing 90 Rax |
+     * Jalen Brunson NBA Play …". (Cards use a different tuple — [2,7,0,cardId]
+     * — so this is the listing route specifically.) */
     route: (listingId) =>
       `https://www.realapp.com/${buildHashids("routing", 11)([30, 0, 0, listingId])}`,
   };
@@ -801,10 +801,15 @@
 
   const isVisible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 
+  /** The panel is part of the page it is searching — a primer click must never
+   * land on its own UI. ("Bid these 1 (90 rax)" is one unlucky regex away from
+   * being taken for Real's Buy Now.) */
+  const inPanel = (el) => !!(panel && panel.contains(el));
+
   function findClickable(re, root) {
     for (const el of (root || document).querySelectorAll('button,[role="button"],a,input[type="submit"]')) {
       const t = (el.textContent || el.value || "").trim();
-      if (t && re.test(t) && isVisible(el) && !el.disabled) return el;
+      if (t && re.test(t) && isVisible(el) && !el.disabled && !inPanel(el)) return el;
     }
     return null;
   }
@@ -830,10 +835,13 @@
   }
 
   /** Blind part of the primer: dump what is actually clickable here, so the two
-   * text patterns above can be corrected against the real page. */
+   * text patterns above can be corrected against the real page. The panel's own
+   * buttons are filtered out — they are never candidates. */
   function primerReport() {
-    const els = [...document.querySelectorAll('button,[role="button"],a')].filter(isVisible);
-    logLine(`primer report — ${els.length} clickable element(s) on ${location.pathname}:`);
+    const all = [...document.querySelectorAll('button,[role="button"],a')].filter(isVisible);
+    const els = all.filter((el) => !inPanel(el));
+    logLine(`primer report — ${els.length} clickable element(s) on ${location.pathname}` +
+      (all.length - els.length ? ` (${all.length - els.length} of them this panel's own, ignored)` : "") + ":");
     for (const el of els.slice(0, 40)) {
       const t = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 48);
       if (t) logLine(`   <${el.tagName.toLowerCase()}> "${t}"`);
