@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.4.2
+// @version      0.5.0
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -41,11 +41,36 @@
   Then, if you like the list, "Bid these" fires exactly that plan — no re-scan.
   A plan older than 5 minutes warns before it bids, because listings turn over.
 
+  THE LOOP (UNATTENDED)
+  ---------------------
+  "Arm loop" runs the selected Quick Search on a timer — every N minutes, off
+  one rax ALLOWANCE (default 10,000), until the allowance is committed, the
+  cycle cap (72) or the wall-clock cap (24 h) is hit, three cycles fail in a
+  row, or STOP is pressed. Keep the tab open on realapp.com; timers throttle in
+  background tabs, so a cycle can start late, never early.
+
+  The allowance counts rax COMMITTED, not rax spent: a bid reserves its price
+  and Real charges only if nobody outbids you in the 10-minute window. So the
+  allowance can stop the loop early; it can never overshoot it.
+
+  The catch is the Turnstile token: it lives ~5 minutes, and the page only
+  mints one when it makes a write of its own. At a 20-minute cadence the
+  harvested token is always stale, so the "primer" (on by default) once a cycle
+  navigates to the cheapest target, clicks the page's own Buy Now — which mints
+  a fresh token AND places that one bid — then fires the rest of the plan on the
+  token that click produced. That click is the fragile part: it matches button
+  TEXT, so if Real re-labels its buttons the primer reports "no Buy Now button
+  found". "Primer report" dumps every clickable element on the page so the two
+  patterns can be corrected.
+
   SAFETY
   ------
     * starts in DRY RUN: Run prints what it would bid and stops
     * three hard caps, enforced in code, not in the UI: rpr / cards / total rax
     * STOP halts immediately, between every single step
+    * the loop adds its own hard stops, all in code: allowance, 72 cycles, 24 h,
+      three consecutive failed cycles — and STOP clears its stored state, so a
+      reload after STOP can't quietly re-arm it
     * a failed bid stops the run — except the two ordinary auction losses: the
       listing vanished, or somebody bid a moment first and the floor moved above
       the price we were going to pay. Those skip, get logged, and the run goes on
@@ -448,18 +473,503 @@
     return found;
   }
 
-  /** Apply the three hard caps, and report which one did the cutting. */
-  function buildPlan(candidates) {
+  /** Apply the hard caps, and report which one did the cutting. `spendCap` is
+   * the loop's remaining allowance when one is armed — it can only ever be
+   * tighter than the per-run spend cap, never looser. */
+  function buildPlan(candidates, spendCap) {
+    const cap = spendCap == null ? DEFAULTS.maxSpend : Math.min(spendCap, DEFAULTS.maxSpend);
     const plan = [];
     let spend = 0;
     let limitedBy = null;
     for (const c of candidates) {
       if (plan.length >= DEFAULTS.maxCards) { limitedBy = "card cap"; break; }
-      if (spend + c.price > DEFAULTS.maxSpend) { limitedBy = limitedBy || "spend cap"; continue; }
+      if (spend + c.price > cap) {
+        limitedBy = limitedBy || (cap < DEFAULTS.maxSpend ? "allowance" : "spend cap");
+        continue;
+      }
       plan.push(c);
       spend += c.price;
     }
     return { plan, spend, limitedBy };
+  }
+
+  // ── the loop: unattended cycles off one rax allowance ────────────────────
+  /** A loop runs with nobody watching, so it stops itself: allowance, cycle
+   * count, wall clock, consecutive failures, and STOP. Nothing here loosens the
+   * per-run rails (maxCards / maxSpend) — it can only ever tighten them. */
+  const LOOP_CAPS = {
+    maxCycles: 72,            // 24 h at the default interval
+    maxHours: 24,
+    maxConsecFails: 3,
+    minIntervalMin: 5,
+    maxIntervalMin: 240,
+    defaultIntervalMin: 20,
+    defaultAllowance: 10000,
+  };
+
+  /** A Turnstile token lives about five minutes AND the page only mints one when
+   * it makes a write of its own. Past this age a bid is a guaranteed 401, which
+   * is why a 20-minute cadence can't simply re-fire the last token. */
+  const TOKEN_FRESH_S = 240;
+  const LOOP_KEY = "walkr.autobid.loop.v1";
+
+  /** The priming click — the fragile half. It leans on Real's own markup by
+   * matching button TEXT, and "Primer report" dumps what is actually clickable
+   * on the page so these two patterns can be corrected against reality. */
+  const PRIMER = {
+    buyNowText: /^(buy ?now|buy|bid)$/i,
+    confirmText: /^(confirm|confirm bid|place bid|buy ?now|yes|ok|continue)$/i,
+    findWaitMs: 12000,
+    settleMs: 9000,
+    /** Where the primer navigates when the target listing is NOT already on the
+     * page. This is the one guess in the loop: Real's share routes are hashids
+     * over a tuple, and a listing's tuple is not documented anywhere public. It
+     * is logged before navigating, so compare it against a listing URL copied
+     * out of the address bar and correct the tuple here if it 404s. */
+    route: (listingId) =>
+      `https://www.realapp.com/${buildHashids("routing", 11)([30, 0, 0, listingId])}`,
+  };
+
+  const LOOP = {
+    on: false,
+    intervalMin: LOOP_CAPS.defaultIntervalMin,
+    allowance: LOOP_CAPS.defaultAllowance,
+    /** The Quick Search the loop was armed on. The primer navigates the page, so
+     * the panel reopens with no selection — without this the next cycles would
+     * fall back to a whole-market sweep. */
+    presetId: "",
+    /** Rax reserved by bids the loop has placed. Real only charges winners, so
+     * this over-counts on purpose: the allowance can stop early, never overshoot. */
+    committed: 0,
+    cycles: 0,
+    consecFails: 0,
+    startedAt: 0,
+    lastRunAt: 0,
+    /** "idle" | "prime" — "prime" means a navigation is in flight and the next
+     * page load owes a Buy Now click before the rest of the plan may fire. */
+    phase: "idle",
+    plan: null,
+    timer: null,
+  };
+
+  function saveLoop() {
+    try {
+      localStorage.setItem(LOOP_KEY, JSON.stringify({
+        on: LOOP.on, intervalMin: LOOP.intervalMin, allowance: LOOP.allowance,
+        presetId: LOOP.presetId,
+        committed: LOOP.committed, cycles: LOOP.cycles, consecFails: LOOP.consecFails,
+        startedAt: LOOP.startedAt, lastRunAt: LOOP.lastRunAt,
+        phase: LOOP.phase, plan: LOOP.plan,
+      }));
+    } catch (_) {}
+  }
+  function loadLoop() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LOOP_KEY) || "null");
+      return s && typeof s === "object" ? s : null;
+    } catch (_) { return null; }
+  }
+
+  const loopRemaining = () => Math.max(0, Number(LOOP.allowance) - Number(LOOP.committed));
+  const loopTokenAge = () => (credsAt["real-turnstile-token"]
+    ? (Date.now() - credsAt["real-turnstile-token"]) / 1000 : Infinity);
+  const tokAgeText = () => {
+    const a = loopTokenAge();
+    return Number.isFinite(a) ? `${Math.round(a / 60)} min old` : "none seen";
+  };
+
+  function loopStatus() {
+    if (!LOOP.on) {
+      return LOOP.committed
+        ? `loop: off · ${LOOP.committed} / ${LOOP.allowance} rax committed this allowance`
+        : "loop: off";
+    }
+    const next = LOOP.lastRunAt
+      ? LOOP.lastRunAt + LOOP.intervalMin * 60000 - Date.now() : null;
+    return `loop: ON · every ${LOOP.intervalMin} min · ${LOOP.committed} / ${LOOP.allowance} rax committed · ` +
+      `cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}` +
+      (next != null && next > 0 ? ` · next in ${Math.ceil(next / 60000)} min` : "") +
+      (LOOP.phase === "prime" ? " · priming a token" : "");
+  }
+
+  function loopStop(reason) {
+    if (LOOP.timer) { clearTimeout(LOOP.timer); LOOP.timer = null; }
+    const was = LOOP.on || LOOP.phase !== "idle";
+    LOOP.on = false; LOOP.phase = "idle"; LOOP.plan = null;
+    saveLoop();
+    if (was) logLine(`LOOP STOPPED — ${reason}`);
+    render();
+  }
+
+  function loopSchedule(delayMs) {
+    if (LOOP.timer) { clearTimeout(LOOP.timer); LOOP.timer = null; }
+    if (!LOOP.on) return;
+    LOOP.timer = setTimeout(() => { LOOP.timer = null; loopCycle(); }, delayMs);
+    render();
+  }
+
+  /** Why the loop should not take another cycle — checked before every one. */
+  function loopBoundHit() {
+    if (!LOOP.on) return "disarmed";
+    if (S.stop) return "STOP pressed";
+    if (loopRemaining() <= 0) return `allowance committed (${LOOP.committed} / ${LOOP.allowance} rax)`;
+    if (LOOP.cycles >= LOOP_CAPS.maxCycles) return `${LOOP_CAPS.maxCycles}-cycle cap reached`;
+    if (LOOP.startedAt && Date.now() - LOOP.startedAt > LOOP_CAPS.maxHours * 3600e3)
+      return `${LOOP_CAPS.maxHours}h wall-clock cap reached`;
+    if (LOOP.consecFails >= LOOP_CAPS.maxConsecFails)
+      return `${LOOP.consecFails} consecutive failed cycles`;
+    return null;
+  }
+
+  /** A placed bid reserves its price, win or lose (Real charges only winners). */
+  async function executePlanLoop(plan) {
+    const r = (await executePlan(plan, logLine)) || { placed: 0, committed: 0, failed: 0 };
+    if (r.committed) { LOOP.committed += r.committed; saveLoop(); }
+    render();
+    return r;
+  }
+
+  function loopEndCycle(failed) {
+    if (failed) LOOP.consecFails++; else LOOP.consecFails = 0;
+    saveLoop();
+    const why = loopBoundHit();
+    if (why && why !== "disarmed") { loopStop(why); return; }
+    const wait = Math.max(LOOP_CAPS.minIntervalMin, Number(LOOP.intervalMin) || LOOP_CAPS.defaultIntervalMin) * 60000;
+    logLine(`next cycle in ${Math.round(wait / 60000)} min (${new Date(Date.now() + wait).toISOString().slice(11, 16)} UTC).`);
+    loopSchedule(wait);
+  }
+
+  async function loopCycle() {
+    const why = loopBoundHit();
+    if (why) { if (why !== "disarmed") loopStop(why); return; }
+    if (S.running) {
+      logLine("loop: a run is already in progress — checking again in a minute.");
+      loopSchedule(60000);
+      return;
+    }
+
+    LOOP.cycles++;
+    LOOP.lastRunAt = Date.now();
+    saveLoop();
+    logLine(`—— LOOP cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles} · ${loopRemaining()} rax of allowance left ——`);
+    render();
+
+    if (!haveCreds()) {
+      const t0 = Date.now();
+      while (!creds["real-auth-info"] && Date.now() - t0 < 15000 && !S.stop) await sleep(400);
+    }
+    if (!creds["real-auth-info"]) {
+      logLine("loop: no real-auth-info harvested — is the app loaded and logged in?");
+      loopEndCycle(true);
+      return;
+    }
+
+    const targets = currentTargets();
+    if (!targets.length) {
+      logLine("loop: nothing to search — pick a Quick Search.");
+      loopEndCycle(true);
+      return;
+    }
+    DEFAULTS.maxRpr = effectiveMaxRpr();
+
+    const label = currentLabel();
+    const pcaps = activePlayerCaps();
+    const pcNote = Object.keys(pcaps).length
+      ? ` · ${Object.entries(pcaps).map(([n, c]) => `${n} ${c}`).join(", ")}` : "";
+    logLine(`loop plan${label ? ` (${label})` : ""}: ${targets.length} group(s) · cap ${DEFAULTS.maxRpr} rpr${pcNote} · ` +
+      `≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · allowance ${loopRemaining()}`);
+
+    let plan = [], spend = 0, limitedBy = null;
+    S.running = true;
+    render();
+    try {
+      const candidates = await scan(targets, logLine);
+      if (S.stop) { S.running = false; loopStop("STOP pressed"); return; }
+      logLine(`found ${candidates.length} qualifying listing(s)`);
+      ({ plan, spend, limitedBy } = buildPlan(candidates, loopRemaining()));
+      if (plan.length) {
+        logLine(`PLAN: ${plan.length} bid(s), ${spend} rax${limitedBy ? ` (cut by ${limitedBy})` : ""}`);
+        for (const p of plan) {
+          logLine(`   ${p.player}  ${RARITY_LABEL[p.rarity]}  ${p.price} rax @ rating ${fmtR(p.rating)}  (${fmtR(p.rpr)} rpr)  #${p.listingId}`);
+        }
+        S.lastPlan = plan; S.lastSpend = spend; S.lastAt = Date.now(); S.lastLabel = label;
+      } else {
+        logLine(candidates.length
+          ? `${candidates.length} listing(s) qualified but none fit what's left (${loopRemaining()} rax allowance, ` +
+            `≤${DEFAULTS.maxSpend} a run${limitedBy ? `, cut by ${limitedBy}` : ""}).`
+          : "nothing qualified this cycle.");
+        S.lastPlan = null;
+      }
+    } catch (e) {
+      logLine(`loop scan ERROR: ${e.message}`);
+    } finally {
+      S.running = false;
+      lastBtn();
+      render();
+    }
+
+    if (S.stop) { loopStop("STOP pressed"); return; }
+    if (!plan.length) { loopEndCycle(false); return; }
+
+    if (!DEFAULTS.live) {
+      logLine("DRY RUN — the loop found these and bid nothing. Tick LIVE to let it spend.");
+      loopEndCycle(false);
+      return;
+    }
+
+    if (loopTokenAge() <= TOKEN_FRESH_S) {
+      const r = await executePlanLoop(plan);
+      loopEndCycle(!!r.failed);
+      return;
+    }
+
+    if (primerEl && primerEl.checked) {
+      const card = plan[0];
+      // Best case: the target listing is on this page already, so its own Buy
+      // Now can mint the token in place — no navigation, no guessed route.
+      const inPlace = findListingBuyNow(card.listingId);
+      if (inPlace) {
+        logLine(`primer: Turnstile token is ${tokAgeText()}, but #${card.listingId} is on this page — ` +
+          "taking a fresh one from its own Buy Now, in place.");
+        const tokBefore = credsAt["real-turnstile-token"] || 0;
+        if (!(await clickPrimerButton(inPlace))) {
+          logLine("primer: could not click its Buy Now — no bids this cycle.");
+          loopEndCycle(true);
+          return;
+        }
+        await primerTail(plan, card, await waitForToken(tokBefore));
+        return;
+      }
+      // Otherwise navigate: the listing page's own Buy Now does the minting, and
+      // the next page load picks the cycle back up (loopResumePrime).
+      LOOP.phase = "prime";
+      LOOP.plan = plan;
+      saveLoop();
+      logLine(`primer: Turnstile token is ${tokAgeText()} and #${card.listingId} (${card.player}) isn't on ` +
+        `this page — navigating to ${PRIMER.route(card.listingId)} to mint one from the page's own Buy Now…`);
+      location.href = PRIMER.route(card.listingId);
+      return;
+    }
+
+    logLine(`no fresh Turnstile token (${tokAgeText()}) and the primer is off — skipping the bids this cycle. ` +
+      "Reload realapp.com once (or tick the primer) to refresh it.");
+    loopEndCycle(false);
+  }
+
+  const isVisible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+
+  function findClickable(re, root) {
+    for (const el of (root || document).querySelectorAll('button,[role="button"],a,input[type="submit"]')) {
+      const t = (el.textContent || el.value || "").trim();
+      if (t && re.test(t) && isVisible(el) && !el.disabled) return el;
+    }
+    return null;
+  }
+
+  /** If the page already shows this listing, its own Buy Now is right there —
+   * far more reliable than navigating to a guessed route. Walks up from any
+   * element that carries the listing id (href / data-* / id) and looks for a
+   * Buy Now within the same card, a few levels up. */
+  function findListingBuyNow(listingId) {
+    const needle = String(listingId);
+    const carriers = [...document.querySelectorAll("[href],[data-id],[data-listing-id],[data-listing],[id]")];
+    for (const c of carriers) {
+      const hay = `${c.getAttribute("href") || ""} ${c.getAttribute("data-id") || ""} ` +
+        `${c.getAttribute("data-listing-id") || ""} ${c.getAttribute("data-listing") || ""} ${c.getAttribute("id") || ""}`;
+      if (!hay.includes(needle)) continue;
+      let box = c;
+      for (let i = 0; i < 5 && box; i++, box = box.parentElement) {
+        const b = findClickable(PRIMER.buyNowText, box);
+        if (b) return b;
+      }
+    }
+    return null;
+  }
+
+  /** Blind part of the primer: dump what is actually clickable here, so the two
+   * text patterns above can be corrected against the real page. */
+  function primerReport() {
+    const els = [...document.querySelectorAll('button,[role="button"],a')].filter(isVisible);
+    logLine(`primer report — ${els.length} clickable element(s) on ${location.pathname}:`);
+    for (const el of els.slice(0, 40)) {
+      const t = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 48);
+      if (t) logLine(`   <${el.tagName.toLowerCase()}> "${t}"`);
+    }
+    render();
+  }
+
+  /** Click the page's own Buy Now (and its confirmation, if one appears). This
+   * is what makes the loop's later bids legal: the page mints the Turnstile
+   * token itself, exactly as if a human had clicked. */
+  async function runPrimer(card) {
+    logLine(`primer: looking for the page's own Buy Now on #${card.listingId} (${card.player})…`);
+    let el = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < PRIMER.findWaitMs && !S.stop) {
+      el = findClickable(PRIMER.buyNowText);
+      if (el) break;
+      await sleep(500);
+    }
+    if (!el) return false;
+    return clickPrimerButton(el);
+  }
+
+  const elText = (el) => (el.textContent || el.value || "").trim().replace(/\s+/g, " ").slice(0, 32);
+
+  /** Click the button, then whatever confirmation follows it. */
+  async function clickPrimerButton(el) {
+    logLine(`primer: clicking "${elText(el)}"`);
+    try { el.click(); } catch (e) { logLine(`primer: the click threw — ${e.message}`); return false; }
+    await sleep(1800);
+    const c = findClickable(PRIMER.confirmText);
+    if (c && c !== el) {
+      logLine(`primer: confirming via "${elText(c)}"`);
+      try { c.click(); } catch (_) {}
+    }
+    await sleep(PRIMER.settleMs);
+    return true;
+  }
+
+  /** The page's own POST is what refreshes the harvested Turnstile token. */
+  async function waitForToken(before, ms) {
+    const limit = ms == null ? 12000 : ms;
+    const t0 = Date.now();
+    while ((credsAt["real-turnstile-token"] || 0) <= before && Date.now() - t0 < limit && !S.stop) {
+      await sleep(400);
+    }
+    return (credsAt["real-turnstile-token"] || 0) > before;
+  }
+
+  /** Shared tail of both primer paths — in place, or after the navigation: book
+   * the bid the primer placed, then fire the rest of the plan on the token that
+   * click minted. */
+  async function primerTail(plan, card, minted) {
+    if (minted) {
+      LOOP.committed += Number(card.price) || 0;
+      saveLoop();
+      logLine(`primer: the page placed #${card.listingId} (${card.player}, ${card.price} rax) and minted a fresh token.`);
+    } else {
+      logLine("primer: clicked, but no fresh token appeared — either Real refused it or that wasn't the bid " +
+        "button. Firing the rest anyway; expect 401s if the token didn't refresh.");
+    }
+    render();
+    // After a navigation the harvested headers may not have arrived yet — bids
+    // sent without real-auth-info are an instant 401.
+    if (!haveCreds()) {
+      const w0 = Date.now();
+      while (!creds["real-auth-info"] && Date.now() - w0 < 15000 && !S.stop) await sleep(400);
+    }
+    if (!creds["real-auth-info"]) {
+      logLine("primer: no auth headers harvested — skipping the rest of this cycle.");
+      loopEndCycle(true);
+      return;
+    }
+    const rest = plan.slice(1);
+    if (!rest.length) { loopEndCycle(false); return; }
+    const r = await executePlanLoop(rest);
+    loopEndCycle(!!r.failed);
+  }
+
+  /** The page load that follows a priming navigation: click, then bid the rest. */
+  async function loopResumePrime() {
+    const plan = LOOP.plan || [];
+    const card = plan[0];
+    LOOP.phase = "idle";
+    saveLoop();
+    logLine(`—— loop resumed after priming (${plan.length} card(s) in the cycle) ——`);
+    render();
+    if (!card) { loopEndCycle(false); return; }
+    if (!DEFAULTS.live) {
+      logLine("DRY RUN — this cycle would have primed and bid; nothing done.");
+      loopEndCycle(false);
+      return;
+    }
+
+    const tokBefore = credsAt["real-turnstile-token"] || 0;
+    if (!(await runPrimer(card))) {
+      logLine('primer: no Buy Now button found on this page — run "Primer report", and copy the address-bar URL, ' +
+        "so the patterns and the listing route can be corrected. No bids this cycle.");
+      loopEndCycle(true);
+      return;
+    }
+    await primerTail(plan, card, await waitForToken(tokBefore));
+  }
+
+  function loopArm() {
+    if (LOOP.on) { loopStop("disarmed by hand"); return; }
+    if (!quickEl.value) {
+      logLine("loop: pick a Quick Search first — a loop needs a fixed lineup, not a whole-market sweep.");
+      return;
+    }
+    if (S.running) { logLine("loop: a run is already in progress — wait for it to finish."); return; }
+    if (!DEFAULTS.live) logLine("loop: LIVE is off, so every cycle is a dry run for now.");
+    if (loopRemaining() <= 0) {
+      logLine("loop: the allowance is already committed — hit Reset allowance first.");
+      return;
+    }
+    LOOP.on = true;
+    LOOP.cycles = 0;
+    LOOP.consecFails = 0;
+    LOOP.startedAt = Date.now();
+    LOOP.lastRunAt = Date.now();
+    LOOP.presetId = quickEl.value;
+    LOOP.phase = "idle";
+    LOOP.plan = null;
+    S.stop = false;
+    saveLoop();
+    logLine(`loop armed — ${quickEl.value} · every ${LOOP.intervalMin} min · allowance ${LOOP.allowance} rax · ` +
+      `≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · hard stop at ${LOOP_CAPS.maxCycles} cycles / ${LOOP_CAPS.maxHours}h / ` +
+      `${LOOP_CAPS.maxConsecFails} failed cycles.`);
+    loopCycle();
+  }
+
+  /** Re-arm after a reload — the primer navigates on purpose, so the loop has to
+   * survive its own page load. */
+  function resumeLoop() {
+    const st = loadLoop();
+    if (!st) return;
+    LOOP.intervalMin = Math.min(LOOP_CAPS.maxIntervalMin,
+      Math.max(LOOP_CAPS.minIntervalMin, Number(st.intervalMin) || LOOP_CAPS.defaultIntervalMin));
+    LOOP.allowance = Number(st.allowance) || LOOP_CAPS.defaultAllowance;
+    LOOP.committed = Number(st.committed) || 0;
+    LOOP.cycles = Number(st.cycles) || 0;
+    LOOP.consecFails = Number(st.consecFails) || 0;
+    LOOP.startedAt = Number(st.startedAt) || 0;
+    LOOP.lastRunAt = Number(st.lastRunAt) || 0;
+    LOOP.plan = st.plan || null;
+    // Restore the Quick Search the loop was armed on. A reload — including the
+    // one the primer causes — otherwise leaves the panel unselected, and the
+    // next cycle would sweep the whole market instead of the lineup.
+    LOOP.presetId = String(st.presetId || "");
+    if (LOOP.presetId && quickEl) {
+      const p = PRESETS.find((x) => x.id === LOOP.presetId);
+      if (p) {
+        quickEl.value = p.id;
+        sportEl.value = p.sport;
+        playersEl.value = "";
+        playersEl.disabled = true;
+      } else {
+        LOOP.on = false;
+        saveLoop();
+        logLine(`loop: the preset it was armed on (${LOOP.presetId}) is gone from this build — loop left off.`);
+        return;
+      }
+    }
+
+    if (st.phase === "prime" && LOOP.plan) {
+      LOOP.on = true;
+      LOOP.phase = "prime";
+      logLine(`loop: resuming a priming cycle (${LOOP.plan.length} card(s), ${loopRemaining()} rax allowance left).`);
+      loopResumePrime();
+      return;
+    }
+    if (!st.on) return;
+    LOOP.on = true;
+    const due = LOOP.lastRunAt + LOOP.intervalMin * 60000;
+    const wait = Math.max(3000, due - Date.now());
+    logLine(`loop: armed and resuming — next cycle in ${Math.max(1, Math.round(wait / 60000))} min · ` +
+      `${LOOP.committed} / ${LOOP.allowance} rax committed · cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}.`);
+    loopSchedule(wait);
   }
 
   // ── state ────────────────────────────────────────────────────────────────
@@ -500,7 +1010,7 @@
     if (tokAge > 240) {
       log(`WARNING: the Turnstile token is ${Math.round(tokAge / 60)} min old and lives about 5 — refresh realapp.com first, or Real will reject the bids.`);
     }
-    let placed = 0, committed = 0, skipped = 0;
+    let placed = 0, committed = 0, skipped = 0, failed = 0;
     log(`LIVE — bidding ${plan.length} · ~1.6s apart with the odd longer pause`);
     await sleep(700 + Math.floor(Math.random() * 1200));   // a beat before the first bid
     for (const p of plan) {
@@ -516,6 +1026,7 @@
         skipped++;
         log(`skip #${p.listingId} ${p.player} — ${respMsg(r)}`);
       } else {
+        failed++;
         log(`FAIL #${p.listingId} (${p.player}) -> ${r.status} ${(r.text || "").slice(0, 140)}`);
         log("stopping on first real failure — nothing further bid.");
         break;
@@ -524,6 +1035,7 @@
       await sleep(bidGap());
     }
     log(`— ${placed} bid(s) placed | ${committed} rax committed | ${skipped} skipped | each card lands only if nobody outbids it in 10 min —`);
+    return { placed, committed, skipped, failed };
   }
 
   async function run() {
@@ -782,6 +1294,10 @@
 
   // ── UI ───────────────────────────────────────────────────────────────────
   let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, lastBtnEl;
+  let intervalEl, allowanceEl, primerEl, loopEl, loopBtnEl;
+  /** boot() runs two or three times (readyState, DOMContentLoaded, load) — the
+   * loop must only be resumed once, or every pass would arm another timer. */
+  let loopResumed = false;
   const btn = (label, fn, css) => {
     const b = document.createElement("button");
     b.textContent = label;
@@ -811,7 +1327,14 @@
     const head = document.createElement("div");
     head.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111c30;border-bottom:1px solid #2a3a55;cursor:move";
     head.innerHTML = '<b style="flex:1">Walkr Autobid</b>';
-    head.appendChild(btn("STOP", () => { S.stop = true; logLine("STOP pressed."); }, "background:#c0392b;color:#fff;font-weight:700;"));
+    // STOP is the kill switch for whatever is running — a single run and an
+    // armed loop both. It also clears the loop's stored state, so a reload
+    // after pressing it doesn't quietly re-arm the thing.
+    head.appendChild(btn("STOP", () => {
+      S.stop = true;
+      if (LOOP.on || LOOP.phase !== "idle") loopStop("STOP pressed.");
+      else logLine("STOP pressed.");
+    }, "background:#c0392b;color:#fff;font-weight:700;"));
     makeDraggable(panel, head);
 
     const cfg = document.createElement("div");
@@ -844,7 +1367,66 @@
     liveEl.innerHTML = '<input type="checkbox"> LIVE (actually bid — spends rax)';
     liveEl.querySelector("input").onchange = (e) => { DEFAULTS.live = e.target.checked; render(); };
 
-    cfg.append(labeled("Quick Search"), quickEl, labeled("Sport"), sportEl, labeled("Players"), playersEl, chipsEl, capsEl, liveEl);
+    /** Loop row: run the selected Quick Search every N minutes off one rax
+     * allowance. The allowance is a ceiling on rax *committed* (bids reserve
+     * their price whether they win or not), not on what the loop may look at. */
+    const loopRow = document.createElement("div");
+    loopRow.style.cssText = "grid-column:1/-1;display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:2px";
+    intervalEl = document.createElement("input");
+    intervalEl.type = "number";
+    intervalEl.min = String(LOOP_CAPS.minIntervalMin);
+    intervalEl.max = String(LOOP_CAPS.maxIntervalMin);
+    intervalEl.step = "1";
+    intervalEl.value = String(LOOP.intervalMin);
+    intervalEl.title = `minutes between cycles (${LOOP_CAPS.minIntervalMin}–${LOOP_CAPS.maxIntervalMin})`;
+    intervalEl.style.cssText = "width:56px;" + selCss();
+    intervalEl.onchange = () => {
+      LOOP.intervalMin = Math.min(LOOP_CAPS.maxIntervalMin,
+        Math.max(LOOP_CAPS.minIntervalMin, Math.round(Number(intervalEl.value) || LOOP_CAPS.defaultIntervalMin)));
+      intervalEl.value = String(LOOP.intervalMin);
+      saveLoop();
+      render();
+    };
+    allowanceEl = document.createElement("input");
+    allowanceEl.type = "number";
+    allowanceEl.min = "0";
+    allowanceEl.step = "500";
+    allowanceEl.value = String(LOOP.allowance);
+    allowanceEl.title = "total rax the loop may commit before it stops itself";
+    allowanceEl.style.cssText = "width:78px;" + selCss();
+    allowanceEl.onchange = () => {
+      LOOP.allowance = Math.max(0, Math.round(Number(allowanceEl.value) || 0));
+      allowanceEl.value = String(LOOP.allowance);
+      saveLoop();
+      render();
+    };
+    primerEl = document.createElement("input");
+    primerEl.type = "checkbox";
+    primerEl.checked = true;
+    const primerLbl = document.createElement("label");
+    primerLbl.title =
+      "once a cycle, click the page's own Buy Now on the cheapest target — that is " +
+      "what mints a fresh Turnstile token, and it places that one bid. Without it a " +
+      "20-minute cadence has a stale token and Real 401s every bid.";
+    primerLbl.style.cssText = "display:flex;gap:5px;align-items:center;color:#9fb3d1";
+    primerLbl.append(primerEl, document.createTextNode("primer"));
+    loopBtnEl = btn("Arm loop", () => loopArm(), "background:#26364f;color:#dce8f8;");
+    loopRow.append(
+      labeled("every"), intervalEl, labeled("min ·"), labeled("allowance"), allowanceEl, labeled("rax"),
+      primerLbl, loopBtnEl,
+      btn("Reset allowance", () => {
+        LOOP.committed = 0;
+        saveLoop();
+        logLine("loop: allowance reset — 0 rax committed.");
+        render();
+      }),
+      btn("Primer report", () => primerReport()),
+    );
+    loopEl = document.createElement("div");
+    loopEl.style.cssText = "grid-column:1/-1;color:#9fb3d1";
+
+    cfg.append(labeled("Quick Search"), quickEl, labeled("Sport"), sportEl, labeled("Players"), playersEl,
+      chipsEl, capsEl, liveEl, loopRow, loopEl);
 
     quickEl.onchange = () => {
       hashPlan = null;   // a manual pick overrides a menu handoff
@@ -1035,6 +1617,13 @@
       ? ` (${Object.entries(pc).map(([n, c]) => `${n} ${c}`).join(", ")})`
       : "";
     capsEl.textContent = `caps: ${DEFAULTS.maxRpr} rax/rating${pcTxt} · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`;
+    if (loopEl) loopEl.textContent = loopStatus();
+    if (loopBtnEl) {
+      loopBtnEl.textContent = LOOP.on ? "Disarm loop" : "Arm loop";
+      loopBtnEl.style.background = LOOP.on ? "#3b2233" : "#26364f";
+    }
+    if (intervalEl && document.activeElement !== intervalEl) intervalEl.value = String(LOOP.intervalMin);
+    if (allowanceEl && document.activeElement !== allowanceEl) allowanceEl.value = String(LOOP.allowance);
     logEl.textContent = S.log.join("\n");
     logEl.scrollTop = logEl.scrollHeight;
   }
@@ -1042,6 +1631,7 @@
   function boot() {
     if (!document.body) { setTimeout(boot, 300); return; }
     if (!panel) buildPanel();
+    if (!loopResumed) { loopResumed = true; resumeLoop(); }
     if (!selfTestOk && !S.log.some((l) => l.includes("SELF-TEST"))) {
       S.log.unshift("SELF-TEST FAILED — the request-token encoder is wrong, every call will 401 as \"Malformed request\".");
       render();
