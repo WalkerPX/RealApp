@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.4
+// @version      0.5.5
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -584,6 +584,7 @@
     try {
       localStorage.setItem(LOOP_KEY, JSON.stringify({
         on: LOOP.on, intervalMin: LOOP.intervalMin, intervalMax: LOOP.intervalMax,
+        live: DEFAULTS.live,
         allowance: LOOP.allowance,
         presetId: LOOP.presetId,
         committed: LOOP.committed, cards: LOOP.cards,
@@ -1105,6 +1106,13 @@
   function resumeLoop() {
     const st = loadLoop();
     if (!st) return;
+    // The primer navigates on purpose, so a live loop has to come back live.
+    // Without this, every priming cycle reloads the page, `live` falls back to
+    // its built-in false, and the cycle dies as a dry run. That is exactly the
+    // bug report: the first cycle bid fine (no navigation), then every cycle
+    // that needed a fresh token announced "DRY RUN ... nothing done" forever.
+    // Only re-armed when the saved state says a loop was actually running.
+    if (st.live && (st.on || st.phase === "prime")) DEFAULTS.live = true;
     LOOP.intervalMin = Math.min(LOOP_CAPS.maxIntervalMin,
       Math.max(LOOP_CAPS.minIntervalMin, Number(st.intervalMin) || LOOP_CAPS.defaultIntervalMin));
     LOOP.intervalMax = Math.max(LOOP.intervalMin,
@@ -1827,6 +1835,12 @@
     if (intervalEl && document.activeElement !== intervalEl) intervalEl.value = String(LOOP.intervalMin);
     if (intervalMaxEl && document.activeElement !== intervalMaxEl) intervalMaxEl.value = String(LOOP.intervalMax);
     if (allowanceEl && document.activeElement !== allowanceEl) allowanceEl.value = String(LOOP.allowance);
+    // Keep the LIVE box honest about what the code is actually doing, including
+    // after a primer navigation re-armed it from localStorage.
+    if (liveEl) {
+      const cb = liveEl.querySelector("input");
+      if (cb && document.activeElement !== cb) cb.checked = !!DEFAULTS.live;
+    }
     logEl.textContent = S.log.join("\n");
     logEl.scrollTop = logEl.scrollHeight;
   }
