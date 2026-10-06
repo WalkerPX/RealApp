@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.3
+// @version      0.5.4
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -519,20 +519,28 @@
   const TOKEN_FRESH_S = 240;
   const LOOP_KEY = "walkr.autobid.loop.v1";
 
-  /** The priming click — the fragile half. It matches button TEXT rather than
-   * markup, because the listing page renders its Buy Now as a plain clickable
-   * element with no role (verified: zero <button>/<a>/[role=button] on it), and
-   * "Primer report" dumps what is actually clickable so these can be corrected
-   * against reality. Prefix match, not exact — the button may read
-   * "Buy Now · 90 Rax" — with findClickable preferring an exact hit and then the
-   * shortest one, so a wrapper containing the button can never win. */
+  /** The priming click — the fragile half, and it matches TEXT only. Real's app
+   * is React Native Web: a live report on a card page found ZERO <button>, <a>
+   * or [role=button], 503 pointer-cursor <div>s carrying generic css-/r- class
+   * names, and exactly one element whose text said "Bid". So the text is the
+   * only signal that survives — and because there are hundreds of candidates,
+   * the primer tries them best-first and moves on if a click mints no token. */
   const PRIMER = {
     buyNowText: /^(buy ?now|buy|bid)\b/i,
-    confirmText: /^(confirm|place bid|buy ?now|yes|ok|continue)\b/i,
-    buyNowExact: "buy now",
-    confirmExact: "confirm",
+    /** Deliberately WITHOUT "buy now": the primary control matches that, and a
+     * confirm step that can re-match it clicks the main button twice. A dialog's
+     * own "Buy Now" is still reachable — see clickPrimerButton, which accepts
+     * anything that appeared only after the first click. */
+    confirmText: /^(confirm|confirm bid|place bid|submit|yes|ok|continue)\b/i,
+    /** Tiers, best first: an exact "buy now" beats an exact "bid", and anything
+     * else is ranked by shortness so a wrapper can't outrank its own button. */
+    exactTiers: ["buy now", "bid", "buy"],
     findWaitMs: 12000,
-    settleMs: 9000,
+    settleMs: 6000,
+    /** How long a click gets to produce a fresh token before the primer treats
+     * it as "that wasn't the bid control" and clicks the next candidate. */
+    mintWaitMs: 6000,
+    maxCandidates: 3,
     /** Where the primer navigates when the target listing is NOT already on the
      * page. VERIFIED 2026-10-05 against listing 1454281451: the encoded tuple
      * renders realapp.com/VVtaFVFra9A1D, titled "Marketplace Listing 90 Rax |
@@ -781,12 +789,12 @@
         logLine(`primer: Turnstile token is ${tokAgeText()}, but #${card.listingId} is on this page — ` +
           "taking a fresh one from its own Buy Now, in place.");
         const tokBefore = credsAt["real-turnstile-token"] || 0;
-        if (!(await clickPrimerButton(inPlace))) {
-          logLine("primer: could not click its Buy Now — no bids this cycle.");
-          loopEndCycle(true);
-          return;
+        let minted = (await clickPrimerButton(inPlace)) && (await waitForToken(tokBefore, PRIMER.mintWaitMs));
+        if (!minted) {
+          logLine(`primer: "${elText(inPlace)}" produced no token — widening to a page-wide search.`);
+          minted = (await primeByClicking(null, inPlace)).minted;
         }
-        await primerTail(plan, card, await waitForToken(tokBefore));
+        await primerTail(plan, card, minted);
         return;
       }
       // Otherwise navigate: the listing page's own Buy Now does the minting, and
@@ -836,10 +844,11 @@
   /** The best match: an exact-text hit first, then the shortest one — shortest,
    * because a wrapper's text also contains the button's, and clicking the
    * wrapper instead of the button is what makes a blind primer feel flaky. */
-  function findClickable(re, root, exact) {
+  function findClickable(re, root, exact, exclude) {
     const want = (exact || "").toLowerCase();
     const norm = (el) => (el.textContent || "").trim().replace(/\s+/g, " ");
     const hits = clickCandidates(root).filter((el) => {
+      if (exclude && exclude(el)) return false;
       const t = norm(el);
       return t && t.length <= 32 && re.test(t);
     });
@@ -864,7 +873,7 @@
       if (!hay.includes(needle)) continue;
       let box = c;
       for (let i = 0; i < 5 && box; i++, box = box.parentElement) {
-        const b = findClickable(PRIMER.buyNowText, box, PRIMER.buyNowExact);
+        const b = primerCandidates(box, 1)[0];
         if (b) return b;
       }
     }
@@ -915,31 +924,80 @@
     render();
   }
 
-  /** Click the page's own Buy Now (and its confirmation, if one appears). This
-   * is what makes the loop's later bids legal: the page mints the Turnstile
-   * token itself, exactly as if a human had clicked. */
-  async function runPrimer(card) {
-    logLine(`primer: looking for the page's own Buy Now on #${card.listingId} (${card.player})…`);
-    let el = null;
+  /** Every plausible bid control on the page (or inside `root`), best first:
+   * an exact "buy now" outranks an exact "bid", which outranks an exact "buy",
+   * and anything else is ranked by how short its text is so that a wrapper can
+   * never outrank the element it wraps. */
+  function primerCandidates(root, limit) {
+    const norm = (el) => (el.textContent || "").trim().replace(/\s+/g, " ");
+    const hits = clickCandidates(root).filter((el) => {
+      const t = norm(el);
+      return t && t.length <= 32 && PRIMER.buyNowText.test(t);
+    });
+    const rank = (el) => {
+      const tier = PRIMER.exactTiers.indexOf(norm(el).toLowerCase());
+      return tier >= 0 ? tier : PRIMER.exactTiers.length + norm(el).length;
+    };
+    hits.sort((a, b) => rank(a) - rank(b) || norm(a).length - norm(b).length);
+    return hits.slice(0, limit == null ? PRIMER.maxCandidates : limit);
+  }
+
+  /** Click candidates in order until one makes the page write something — that
+   * write is what mints the Turnstile token the rest of the plan bids on, so a
+   * click that produces no token simply means "not the bid control" and the
+   * primer moves on. With hundreds of generic divs on the page this is what
+   * makes a blind primer survive an ambiguous label instead of dying on it. */
+  async function primeByClicking(root, skip) {
+    const cands = primerCandidates(root).filter((el) => el !== skip);
+    if (!cands.length) return { ok: false, minted: false, el: null };
+    for (let i = 0; i < cands.length; i++) {
+      const el = cands[i];
+      const before = credsAt["real-turnstile-token"] || 0;
+      if (!(await clickPrimerButton(el))) continue;
+      if (await waitForToken(before, PRIMER.mintWaitMs)) return { ok: true, minted: true, el };
+      if (i < cands.length - 1) {
+        logLine(`primer: "${elText(el)}" produced no token — that wasn't the bid control, trying the next candidate.`);
+      }
+    }
+    return { ok: true, minted: false, el: cands[0] };
+  }
+
+  /** Wait for the page to render a candidate, then work through them. */
+  async function runPrimer(root) {
+    logLine("primer: looking for the page's own bid control…");
     const t0 = Date.now();
     while (Date.now() - t0 < PRIMER.findWaitMs && !S.stop) {
-      el = findClickable(PRIMER.buyNowText, null, PRIMER.buyNowExact);
-      if (el) break;
+      if (primerCandidates(root).length) break;
       await sleep(500);
     }
-    if (!el) return false;
-    return clickPrimerButton(el);
+    return primeByClicking(root);
   }
 
   const elText = (el) => (el.textContent || el.value || "").trim().replace(/\s+/g, " ").slice(0, 32);
 
-  /** Click the button, then whatever confirmation follows it. */
+  /** Everything clickable whose text matches — used to snapshot what was on the
+   * page BEFORE a click, so a confirm step can tell a new dialog from the button
+   * that was already sitting there. */
+  function matchingControls(re) {
+    const norm = (el) => (el.textContent || "").trim().replace(/\s+/g, " ");
+    return clickCandidates(null).filter((el) => {
+      const t = norm(el);
+      return t && t.length <= 32 && re.test(t);
+    });
+  }
+
+  /** Click the button, then whatever confirmation follows it. The confirm search
+   * ignores both the element just clicked and anything that was already on the
+   * page beforehand — otherwise the primary control (which matches "Buy Now"
+   * too) gets clicked a second time. */
   async function clickPrimerButton(el) {
     logLine(`primer: clicking "${elText(el)}"`);
+    const preExisting = new Set(matchingControls(PRIMER.confirmText));
     try { el.click(); } catch (e) { logLine(`primer: the click threw — ${e.message}`); return false; }
     await sleep(1800);
-    const c = findClickable(PRIMER.confirmText, null, PRIMER.confirmExact);
-    if (c && c !== el) {
+    const c = findClickable(PRIMER.confirmText, null, "confirm",
+      (x) => x === el || preExisting.has(x));
+    if (c) {
       logLine(`primer: confirming via "${elText(c)}"`);
       try { c.click(); } catch (_) {}
     }
@@ -1004,14 +1062,13 @@
       return;
     }
 
-    const tokBefore = credsAt["real-turnstile-token"] || 0;
-    if (!(await runPrimer(card))) {
-      logLine('primer: no Buy Now button found on this page — run "Primer report", and copy the address-bar URL, ' +
-        "so the patterns and the listing route can be corrected. No bids this cycle.");
+    const r = await runPrimer(null);
+    if (!r.ok) {
+      logLine('primer: no bid control found on this page — run "Primer report" and send me the list. No bids this cycle.');
       loopEndCycle(true);
       return;
     }
-    await primerTail(plan, card, await waitForToken(tokBefore));
+    await primerTail(plan, card, r.minted);
   }
 
   function loopArm() {

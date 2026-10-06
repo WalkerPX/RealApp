@@ -191,26 +191,38 @@ Buy Now: in place when the listing is already on the page, otherwise after
 navigating to `PRIMER.route(listingId)` (verified: listing 1454281451 →
 `/VVtaFVFra9A1D`, titled "Marketplace Listing 90 Rax | Jalen Brunson NBA Play…").
 
-It matches **text, not markup**, because Real's listing page renders *zero*
-`<button>`, `<a>` or `[role=button]` outside this panel — the control is a plain
-clickable div. So `clickCandidates()` scans every element and keeps the ones that
-look interactive (real controls, `role=button`, `tabindex`, an `onclick`, or a
-`pointer` cursor), and `PRIMER.buyNowText` matches the visible text, preferring an
-exact `"buy now"` hit and then the shortest one, so a wrapper containing the
-button can never win. Anything inside the panel is excluded — the panel has a
-`Bid these 1 (90 rax)` button that is one regex away from being mistaken for
-Real's.
+It matches **text, not markup**. A live Primer report on a card page settled it:
+the app is React Native Web, so there are **zero** `<button>`, `<a>` or
+`[role=button]` elements, **503** pointer-cursor `<div>`s with generic `css-`/`r-`
+class names, and exactly **one** element whose text said `Bid`. So text is the
+only signal that survives:
+
+- `clickCandidates()` keeps anything that looks interactive (a real control,
+  `role=button`, a `tabindex`, an `onclick`, or a `pointer` cursor).
+- `primerCandidates()` ranks matches: an exact `buy now` → an exact `bid` → an
+  exact `buy` → then shortest text, so a wrapper can never outrank its own button.
+- `primeByClicking()` clicks them **in order** and moves to the next whenever a
+  click mints no token — with hundreds of generic divs, one ambiguous label must
+  not kill the cycle. A click that mints nothing means "not the bid control"; it
+  costs nothing.
+- The confirm step deliberately does **not** match `buy now` (the primary control
+  matches that, and the first version clicked it twice), and it ignores anything
+  that was already on the page before the click — so only a dialog that *appeared*
+  can be confirmed.
+- The panel's own controls are always excluded. `Bid these 1 (90 rax)` is one
+  regex away from being mistaken for Real's.
 
 **Primer report** dumps the page's real controls, its pointer-cursor leaves, and
 every leaf mentioning buy/bid/offer/rax — that is what to send if the primer logs
-`no Buy Now button found`.
+`no bid control found`.
 
-Two jsdom suites cover this headlessly (`/tmp/walkr-test/run.cjs` for the loop,
-`primer.cjs` for the primer): dry-run plans and spends nothing, a small allowance
-refuses to bid, LIVE bids at the buy-now price and debits the balance, a spent
-allowance refuses to re-arm, the cadence lands inside `[min, max]`, and the
-primer finds/clicks a div-based Buy Now while ignoring both a decoy and its own
-panel.
+Three jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
+loop, `primer.cjs` for the primer): dry-run plans and spends nothing, a small
+allowance refuses to bid, LIVE bids at the buy-now price and debits the balance
+card by card, a spent allowance refuses to re-arm, the cadence lands inside
+`[min, max]`, and the primer finds/clicks a div-based `Buy Now` **before** a
+second-ranked `Bid`, exactly once, while ignoring a non-matching pointer div and
+its own panel.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
 preset's id and the next-cycle timestamp — the primer reloads the page, and
