@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.6
+// @version      0.5.7
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -92,7 +92,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.5.6";
+    GM_info.script && GM_info.script.version) || "0.5.7";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -407,8 +407,11 @@
       const match = PRESETS.find((p) => p.label === lbl);
       return (match && match.playerCaps) || NO_CAPS;
     }
-    const p = quickEl && PRESETS.find((x) => x.id === quickEl.value);
-    return (p && p.playerCaps) || NO_CAPS;
+    const ps = selectedPresets();
+    if (!ps.length) return NO_CAPS;
+    const merged = {};
+    for (const p of ps) Object.assign(merged, p.playerCaps || {});
+    return Object.keys(merged).length ? merged : NO_CAPS;
   }
 
   /** The rax-per-rating ceiling for one player: their own when the lineup names
@@ -568,7 +571,7 @@
     /** The Quick Search the loop was armed on. The primer navigates the page, so
      * the panel reopens with no selection — without this the next cycles would
      * fall back to a whole-market sweep. */
-    presetId: "",
+    presetIds: [],
     /** Rax reserved by bids the loop has placed. Real only charges winners, so
      * this over-counts on purpose: the allowance can stop early, never overshoot. */
     committed: 0,
@@ -593,7 +596,7 @@
         on: LOOP.on, intervalMin: LOOP.intervalMin, intervalMax: LOOP.intervalMax,
         live: DEFAULTS.live,
         allowance: LOOP.allowance,
-        presetId: LOOP.presetId,
+        presetIds: LOOP.presetIds,
         committed: LOOP.committed, cards: LOOP.cards,
         cycles: LOOP.cycles, consecFails: LOOP.consecFails,
         startedAt: LOOP.startedAt, lastRunAt: LOOP.lastRunAt, nextAt: LOOP.nextAt,
@@ -1081,7 +1084,8 @@
 
   function loopArm() {
     if (LOOP.on) { loopStop("disarmed by hand"); return; }
-    if (!quickEl.value) {
+    const armed = selectedPresets();
+    if (!armed.length) {
       logLine("loop: pick a Quick Search first — a loop needs a fixed lineup, not a whole-market sweep.");
       return;
     }
@@ -1097,12 +1101,12 @@
     LOOP.startedAt = Date.now();
     LOOP.lastRunAt = Date.now();
     LOOP.nextAt = 0;
-    LOOP.presetId = quickEl.value;
+    LOOP.presetIds = armed.map((p) => p.id);
     LOOP.phase = "idle";
     LOOP.plan = null;
     S.stop = false;
     saveLoop();
-    logLine(`loop armed — ${quickEl.value} · ${fmtRax(loopRemaining())} rax allowance · a random ` +
+    logLine(`loop armed — ${armed.map((p) => p.label).join(" + ")} · ${fmtRax(loopRemaining())} rax allowance · a random ` +
       `${LOOP.intervalMin}\u2013${LOOP.intervalMax} min wait between cycles · ≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · ` +
       `hard stop at ${LOOP_CAPS.maxCycles} cycles / ${LOOP_CAPS.maxHours}h / ${LOOP_CAPS.maxConsecFails} failed cycles.`);
     loopCycle();
@@ -1133,23 +1137,26 @@
     LOOP.lastRunAt = Number(st.lastRunAt) || 0;
     LOOP.nextAt = Number(st.nextAt) || 0;
     LOOP.plan = st.plan || null;
-    // Restore the Quick Search the loop was armed on. A reload — including the
-    // one the primer causes — otherwise leaves the panel unselected, and the
-    // next cycle would sweep the whole market instead of the lineup.
-    LOOP.presetId = String(st.presetId || "");
-    if (LOOP.presetId && quickEl) {
-      const p = PRESETS.find((x) => x.id === LOOP.presetId);
-      if (p) {
-        quickEl.value = p.id;
-        sportEl.value = p.sport;
-        playersEl.value = "";
-        playersEl.disabled = true;
-      } else {
+    // Restore the Quick Search the loop was armed on — every lineup of it. A
+    // reload (including the one the primer causes) otherwise leaves the panel
+    // unselected, and the next cycle would sweep the whole market instead.
+    // Older builds stored a single `presetId`; read that as a one-item list.
+    LOOP.presetIds = (Array.isArray(st.presetIds) ? st.presetIds : (st.presetId ? [st.presetId] : []))
+      .map(String).filter(Boolean);
+    if (LOOP.presetIds.length && quickEl) {
+      const found = LOOP.presetIds.map((id) => PRESETS.find((x) => x.id === id)).filter(Boolean);
+      // All of them, or none: quietly dropping one lineup the loop was armed on
+      // would bid a different set of cards than the one that was chosen.
+      if (found.length !== LOOP.presetIds.length) {
         LOOP.on = false;
         saveLoop();
-        logLine(`loop: the preset it was armed on (${LOOP.presetId}) is gone from this build — loop left off.`);
+        logLine(`loop: the lineup it was armed on (${LOOP.presetIds.join(", ")}) is gone from this build — loop left off.`);
         return;
       }
+      setSelectedPresets(found.map((p) => p.id));
+      sportEl.value = found[0].sport;
+      playersEl.value = "";
+      playersEl.disabled = true;
     }
 
     if (st.phase === "prime" && LOOP.plan) {
@@ -1342,11 +1349,30 @@
     }
   } catch (_) { hashPlan = null; }
 
+  /** Every preset the Quick Search has selected, in menu order. The control is a
+   * multi-select so one loop can run more than one lineup off the same
+   * allowance — Optimal Setup · NBA and · NHL together, for instance. Note that
+   * `quickEl.value` only ever reports the FIRST selected option, which is why
+   * everything downstream asks here instead. */
+  function selectedPresets() {
+    if (!quickEl) return [];
+    const ids = new Set(
+      Array.from(quickEl.selectedOptions || []).map((o) => o.value).filter(Boolean)
+    );
+    return PRESETS.filter((p) => ids.has(p.id));
+  }
+
+  /** Select exactly these preset ids and nothing else. */
+  function setSelectedPresets(ids) {
+    if (!quickEl) return;
+    const want = new Set(ids || []);
+    for (const o of Array.from(quickEl.options)) o.selected = want.has(o.value);
+  }
+
   function currentLabel() {
     if (hashPlan) return hashPlan.label || "Walkr's Menu";
-    const p = PRESETS.find((x) => x.id === (quickEl && quickEl.value));
-    if (p) return p.label;
-    return "";
+    const ps = selectedPresets();
+    return ps.length ? ps.map((p) => p.label).join(" + ") : "";
   }
 
   /** The rpr ceiling for THIS run, in priority order: a Walkr's Menu handoff,
@@ -1356,8 +1382,13 @@
    * can't leave a loosened ceiling behind. */
   function effectiveMaxRpr() {
     if (hashPlan && hashPlan.maxRpr != null) return Number(hashPlan.maxRpr);
-    const p = quickEl && PRESETS.find((x) => x.id === quickEl.value);
-    if (p && p.maxRpr != null) return Number(p.maxRpr);
+    // A loosened ceiling is only inherited when *every* selected lineup declares
+    // one. Mixing a capped preset with an uncapped one falls back to the shipped
+    // cap, so selecting a second preset can never leave 21 behind on a lineup
+    // that never asked for it.
+    const ps = selectedPresets();
+    if (ps.length && ps.every((p) => p.maxRpr != null))
+      return Math.max(...ps.map((p) => Number(p.maxRpr)));
     return SCRIPT_CAPS.maxRpr;
   }
 
@@ -1393,8 +1424,8 @@
    * the list, so there is nothing to chip. */
   function sourceSlices() {
     if (hashPlan && Array.isArray(hashPlan.targets)) return hashPlan.targets;
-    const p = quickEl && PRESETS.find((x) => x.id === quickEl.value);
-    return p ? p.slices : null;
+    const ps = selectedPresets();
+    return ps.length ? ps.flatMap((p) => p.slices) : null;
   }
 
   /** Drop excluded players, then drop slices left with nobody in them — an empty
@@ -1418,10 +1449,12 @@
       if (hashPlan.maxSpend != null) DEFAULTS.maxSpend = Number(hashPlan.maxSpend);
       return applyExclusions(hashPlan.targets.map((t) => ({ ...t })));
     }
-    const preset = PRESETS.find((x) => x.id === quickEl.value);
-    if (preset)
+    const presets = selectedPresets();
+    if (presets.length)
       return applyExclusions(
-        preset.slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players }))
+        presets.flatMap((p) =>
+          p.slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players }))
+        )
       );
     const players = playersEl.value.split(",").map((s) => s.trim()).filter(Boolean);
     const sp = sportEl.value;
@@ -1543,9 +1576,14 @@
     cfg.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3a55;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center;flex:0 1 auto;min-height:0;overflow:auto";
 
     quickEl = document.createElement("select");
+    // Multi-select: one loop can carry two lineups (Optimal Setup · NBA and · NHL)
+    // off a single allowance. Plain click picks one; ctrl/cmd-click adds another.
+    quickEl.multiple = true;
+    quickEl.size = 4;
+    quickEl.title = "plain click = one lineup · ctrl/cmd-click = add another to the same run";
     quickEl.appendChild(opt("", "— none —"));
     for (const p of PRESETS) quickEl.appendChild(opt(p.id, p.label));
-    quickEl.style.cssText = selCss();
+    quickEl.style.cssText = selCss() + "height:auto;min-height:66px;";
 
     sportEl = document.createElement("select");
     sportEl.appendChild(opt("all", "all"));
@@ -1649,16 +1687,16 @@
     quickEl.onchange = () => {
       hashPlan = null;   // a manual pick overrides a menu handoff
       excluded.clear();  // picking a Quick Search restores every player it lists
-      const p = PRESETS.find((x) => x.id === quickEl.value);
+      const ps = selectedPresets();
       // Picking a preset sets its sport (Low PerRax and All Sports are multi-sport,
       // so those show "all"). The preset carries its own players, so the box is
       // cleared and parked.
-      if (p) { sportEl.value = p.sport; playersEl.value = ""; playersEl.disabled = true; }
+      if (ps.length) { sportEl.value = ps[0].sport; playersEl.value = ""; playersEl.disabled = true; }
       else { playersEl.disabled = false; }
       render();
     };
-    sportEl.onchange = () => { hashPlan = null; quickEl.value = ""; excluded.clear(); playersEl.disabled = false; render(); };
-    playersEl.oninput = () => { if (playersEl.value.trim()) { hashPlan = null; quickEl.value = ""; excluded.clear(); } render(); };
+    sportEl.onchange = () => { hashPlan = null; setSelectedPresets([]); excluded.clear(); playersEl.disabled = false; render(); };
+    playersEl.oninput = () => { if (playersEl.value.trim()) { hashPlan = null; setSelectedPresets([]); excluded.clear(); } render(); };
 
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap;flex:0 0 auto";
