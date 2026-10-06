@@ -169,30 +169,38 @@ handoff quoting 21 from tripping the stale-menu drift note.
 
 ### The loop — unattended cycles off one allowance
 
-"Arm loop" re-runs the selected Quick Search every N minutes (5–240, default 20)
-under a single rax allowance (default 10,000). Hard stops, all in code: allowance
-committed · 72 cycles · 24 h wall clock · 3 consecutive failed cycles · STOP
-(which also clears the stored state, so a reload after STOP can't re-arm it).
+"Arm loop" re-runs the selected Quick Search on a timer under a single rax
+allowance (default 10,000). The wait between cycles is a **random value in
+[8, 11] minutes** (both ends editable in the panel, clamped 5–240) — a metronome
+is the easiest part of a bot to spot, and Real's listings turn over on a
+human-ish cadence anyway. Hard stops, all in code: allowance committed · 72
+cycles · 24 h wall clock · 3 consecutive failed cycles · STOP (which also clears
+the stored state, so a reload after STOP can't re-arm it).
 
-The allowance tracks rax **committed**, not spent — a bid reserves its price and
-Real charges only the winners — so the loop stops early rather than overshooting.
-The per-run rails stay: ≤50 cards and ≤1000 rax a cycle, with the allowance
-sitting above them.
+The panel shows the allowance as a running **balance** — `9,760 rax left of
+10,000 · 2 cards bid` — which drops card by card as the loop bids, and the same
+number is appended to every `BID OK` line. It tracks rax **committed**, not
+spent: a bid reserves its price and Real charges only the winners, so the
+balance can stop the loop early but can never overshoot it. The per-run rails
+stay: ≤50 cards and ≤1000 rax a cycle, with the allowance sitting above them.
 
 Bids need a page-minted Turnstile token (~5 min TTL, and the page only mints one
-when it makes a write of its own). A 20-minute cadence therefore *always* has a
-stale token, so the **primer** (on by default) once a cycle navigates to the
-cheapest target and clicks the page's own Buy Now — that mints a token *and*
-places that one bid — then fires the rest of the plan on the token the click
-produced. The click matches button TEXT (`PRIMER.buyNowText` / `confirmText` in
-the script), so it is the fragile part: if Real re-labels its buttons the log
-says "no Buy Now button found", and **Primer report** dumps every clickable
-element on the page so the two patterns can be corrected against reality.
+when it makes a write of its own), so any loop cadence carries a stale token —
+the **primer** (on by default) once a cycle navigates to the cheapest target and
+clicks the page's own Buy Now: that mints a token *and* places that one bid, and
+the rest of the plan fires on the token the click produced. It clicks in place
+if the listing is already on the page, and otherwise navigates to
+`PRIMER.route(listingId)`. The click matches button TEXT
+(`PRIMER.buyNowText` / `confirmText`) and the route tuple is a guess — those two
+are the fragile parts: if Real re-labels its buttons the log says "no Buy Now
+button found", and **Primer report** dumps every clickable element on the page so
+the patterns can be corrected against reality.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
-preset's id — the primer reloads the page, and without that the cycle after the
-reload would fall back to a whole-market sweep. The tab must stay open on
-realapp.com; background timers throttle, so a cycle can start late, never early.
+preset's id and the next-cycle timestamp — the primer reloads the page, and
+without the preset id the cycle after the reload would fall back to a
+whole-market sweep. The tab must stay open on realapp.com; background timers
+throttle, so a cycle can start late, never early.
 
 ### The 401 that wasn't an auth problem
 

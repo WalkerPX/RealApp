@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.0
+// @version      0.5.1
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -43,19 +43,24 @@
 
   THE LOOP (UNATTENDED)
   ---------------------
-  "Arm loop" runs the selected Quick Search on a timer — every N minutes, off
-  one rax ALLOWANCE (default 10,000), until the allowance is committed, the
-  cycle cap (72) or the wall-clock cap (24 h) is hit, three cycles fail in a
-  row, or STOP is pressed. Keep the tab open on realapp.com; timers throttle in
-  background tabs, so a cycle can start late, never early.
+  "Arm loop" runs the selected Quick Search on a timer — a random wait between
+  8 and 11 minutes (both ends editable), off one rax ALLOWANCE (default
+  10,000), until the allowance is committed, the cycle cap (72) or the
+  wall-clock cap (24 h) is hit, three cycles fail in a row, or STOP is pressed.
+  Keep the tab open on realapp.com; timers throttle in background tabs, so a
+  cycle can start late, never early.
+
+  The panel shows the allowance as a running BALANCE — "9,760 rax left of
+  10,000 · 2 cards bid" — and it drops card by card as the loop bids, with the
+  same number appended to every BID OK line in the log.
 
   The allowance counts rax COMMITTED, not rax spent: a bid reserves its price
   and Real charges only if nobody outbids you in the 10-minute window. So the
-  allowance can stop the loop early; it can never overshoot it.
+  balance can stop the loop early; it can never overshoot it.
 
   The catch is the Turnstile token: it lives ~5 minutes, and the page only
-  mints one when it makes a write of its own. At a 20-minute cadence the
-  harvested token is always stale, so the "primer" (on by default) once a cycle
+  mints one when it makes a write of its own. Any loop cadence is therefore
+  always carrying a stale token, so the "primer" (on by default) once a cycle
   navigates to the cheapest target, clicks the page's own Buy Now — which mints
   a fresh token AND places that one bid — then fires the rest of the plan on the
   token that click produced. That click is the fragile part: it matches button
@@ -503,7 +508,8 @@
     maxConsecFails: 3,
     minIntervalMin: 5,
     maxIntervalMin: 240,
-    defaultIntervalMin: 20,
+    defaultIntervalMin: 8,
+    defaultIntervalMax: 11,
     defaultAllowance: 10000,
   };
 
@@ -533,6 +539,10 @@
   const LOOP = {
     on: false,
     intervalMin: LOOP_CAPS.defaultIntervalMin,
+    /** Cycles are spaced by a random wait in [intervalMin, intervalMax] — a
+     * metronome is the easiest thing about a bot to spot, and Real's own
+     * pricing moves on a human-ish cadence. */
+    intervalMax: LOOP_CAPS.defaultIntervalMax,
     allowance: LOOP_CAPS.defaultAllowance,
     /** The Quick Search the loop was armed on. The primer navigates the page, so
      * the panel reopens with no selection — without this the next cycles would
@@ -541,10 +551,14 @@
     /** Rax reserved by bids the loop has placed. Real only charges winners, so
      * this over-counts on purpose: the allowance can stop early, never overshoot. */
     committed: 0,
+    /** Cards the loop has bid on — the count that ticks the balance down. */
+    cards: 0,
     cycles: 0,
     consecFails: 0,
     startedAt: 0,
     lastRunAt: 0,
+    /** When the next cycle is due (the wait is random, so it can't be derived). */
+    nextAt: 0,
     /** "idle" | "prime" — "prime" means a navigation is in flight and the next
      * page load owes a Buy Now click before the rest of the plan may fire. */
     phase: "idle",
@@ -555,10 +569,12 @@
   function saveLoop() {
     try {
       localStorage.setItem(LOOP_KEY, JSON.stringify({
-        on: LOOP.on, intervalMin: LOOP.intervalMin, allowance: LOOP.allowance,
+        on: LOOP.on, intervalMin: LOOP.intervalMin, intervalMax: LOOP.intervalMax,
+        allowance: LOOP.allowance,
         presetId: LOOP.presetId,
-        committed: LOOP.committed, cycles: LOOP.cycles, consecFails: LOOP.consecFails,
-        startedAt: LOOP.startedAt, lastRunAt: LOOP.lastRunAt,
+        committed: LOOP.committed, cards: LOOP.cards,
+        cycles: LOOP.cycles, consecFails: LOOP.consecFails,
+        startedAt: LOOP.startedAt, lastRunAt: LOOP.lastRunAt, nextAt: LOOP.nextAt,
         phase: LOOP.phase, plan: LOOP.plan,
       }));
     } catch (_) {}
@@ -578,17 +594,24 @@
     return Number.isFinite(a) ? `${Math.round(a / 60)} min old` : "none seen";
   };
 
+  const fmtRax = (n) => Number(n || 0).toLocaleString("en-US");
+
+  /** The allowance line — the balance first, because that is the number that
+   * decides whether the loop keeps going, then what has been bid against it.
+   * `committed` is what has been bid (not what Real has taken: only winners are
+   * charged), so the balance falls with every card the loop bids on. */
   function loopStatus() {
+    const left = loopRemaining();
+    const bid = `${fmtRax(LOOP.committed)} rax / ${LOOP.cards} card${LOOP.cards === 1 ? "" : "s"} bid`;
     if (!LOOP.on) {
       return LOOP.committed
-        ? `loop: off · ${LOOP.committed} / ${LOOP.allowance} rax committed this allowance`
-        : "loop: off";
+        ? `loop: off · ${fmtRax(left)} rax left of ${fmtRax(LOOP.allowance)} · ${bid}`
+        : `loop: off · allowance ${fmtRax(LOOP.allowance)} rax`;
     }
-    const next = LOOP.lastRunAt
-      ? LOOP.lastRunAt + LOOP.intervalMin * 60000 - Date.now() : null;
-    return `loop: ON · every ${LOOP.intervalMin} min · ${LOOP.committed} / ${LOOP.allowance} rax committed · ` +
-      `cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}` +
-      (next != null && next > 0 ? ` · next in ${Math.ceil(next / 60000)} min` : "") +
+    const next = LOOP.nextAt ? LOOP.nextAt - Date.now() : null;
+    return `loop: ON · ${fmtRax(left)} rax left of ${fmtRax(LOOP.allowance)} · ${bid} · ` +
+      `every ${LOOP.intervalMin}\u2013${LOOP.intervalMax} min · cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}` +
+      (next != null && next > 0 ? ` · next in ${Math.max(1, Math.ceil(next / 60000))} min` : "") +
       (LOOP.phase === "prime" ? " · priming a token" : "");
   }
 
@@ -603,9 +626,22 @@
 
   function loopSchedule(delayMs) {
     if (LOOP.timer) { clearTimeout(LOOP.timer); LOOP.timer = null; }
-    if (!LOOP.on) return;
+    if (!LOOP.on) { LOOP.nextAt = 0; saveLoop(); return; }
+    LOOP.nextAt = Date.now() + delayMs;
+    saveLoop();
     LOOP.timer = setTimeout(() => { LOOP.timer = null; loopCycle(); }, delayMs);
     render();
+  }
+
+  /** A random wait inside [intervalMin, intervalMax], clamped to the caps. A
+   * metronome is the easiest part of a bot to spot, and Real's own listings
+   * turn over on a human-ish cadence, so the gap is deliberately irregular. */
+  function loopWaitMs() {
+    const clamp = (v, lo) => Math.min(LOOP_CAPS.maxIntervalMin, Math.max(lo, Math.round(v)));
+    const lo = clamp(Number(LOOP.intervalMin) || LOOP_CAPS.defaultIntervalMin, LOOP_CAPS.minIntervalMin);
+    const hi = clamp(Number(LOOP.intervalMax) || LOOP_CAPS.defaultIntervalMax, lo);
+    const pick = lo + Math.floor(Math.random() * (hi - lo + 1));
+    return pick * 60000;
   }
 
   /** Why the loop should not take another cycle — checked before every one. */
@@ -621,10 +657,16 @@
     return null;
   }
 
-  /** A placed bid reserves its price, win or lose (Real charges only winners). */
+  /** A placed bid reserves its price, win or lose (Real charges only winners),
+   * and the balance is debited and repainted as each card lands — so the panel
+   * ticks down card by card while a plan is firing. */
   async function executePlanLoop(plan) {
-    const r = (await executePlan(plan, logLine)) || { placed: 0, committed: 0, failed: 0 };
-    if (r.committed) { LOOP.committed += r.committed; saveLoop(); }
+    const r = (await executePlan(plan, logLine, (p) => {
+      LOOP.committed += Number(p.price) || 0;
+      LOOP.cards += 1;
+      saveLoop();
+      render();
+    })) || { placed: 0, committed: 0, failed: 0 };
     render();
     return r;
   }
@@ -634,7 +676,7 @@
     saveLoop();
     const why = loopBoundHit();
     if (why && why !== "disarmed") { loopStop(why); return; }
-    const wait = Math.max(LOOP_CAPS.minIntervalMin, Number(LOOP.intervalMin) || LOOP_CAPS.defaultIntervalMin) * 60000;
+    const wait = loopWaitMs();
     logLine(`next cycle in ${Math.round(wait / 60000)} min (${new Date(Date.now() + wait).toISOString().slice(11, 16)} UTC).`);
     loopSchedule(wait);
   }
@@ -651,7 +693,8 @@
     LOOP.cycles++;
     LOOP.lastRunAt = Date.now();
     saveLoop();
-    logLine(`—— LOOP cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles} · ${loopRemaining()} rax of allowance left ——`);
+    logLine(`—— LOOP cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles} · ${fmtRax(loopRemaining())} rax left of ` +
+      `${fmtRax(LOOP.allowance)}${LOOP.cards ? ` · ${LOOP.cards} card(s) bid so far` : ""} ——`);
     render();
 
     if (!haveCreds()) {
@@ -677,7 +720,7 @@
     const pcNote = Object.keys(pcaps).length
       ? ` · ${Object.entries(pcaps).map(([n, c]) => `${n} ${c}`).join(", ")}` : "";
     logLine(`loop plan${label ? ` (${label})` : ""}: ${targets.length} group(s) · cap ${DEFAULTS.maxRpr} rpr${pcNote} · ` +
-      `≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · allowance ${loopRemaining()}`);
+      `≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · allowance ${fmtRax(loopRemaining())} rax`);
 
     let plan = [], spend = 0, limitedBy = null;
     S.running = true;
@@ -695,7 +738,7 @@
         S.lastPlan = plan; S.lastSpend = spend; S.lastAt = Date.now(); S.lastLabel = label;
       } else {
         logLine(candidates.length
-          ? `${candidates.length} listing(s) qualified but none fit what's left (${loopRemaining()} rax allowance, ` +
+          ? `${candidates.length} listing(s) qualified but none fit what's left (${fmtRax(loopRemaining())} rax left, ` +
             `≤${DEFAULTS.maxSpend} a run${limitedBy ? `, cut by ${limitedBy}` : ""}).`
           : "nothing qualified this cycle.");
         S.lastPlan = null;
@@ -846,8 +889,10 @@
   async function primerTail(plan, card, minted) {
     if (minted) {
       LOOP.committed += Number(card.price) || 0;
+      LOOP.cards += 1;
       saveLoop();
-      logLine(`primer: the page placed #${card.listingId} (${card.player}, ${card.price} rax) and minted a fresh token.`);
+      logLine(`primer: the page placed #${card.listingId} (${card.player}, ${card.price} rax) and minted a fresh token ` +
+        `— ${fmtRax(loopRemaining())} rax left of the allowance.`);
     } else {
       logLine("primer: clicked, but no fresh token appeared — either Real refused it or that wasn't the bid " +
         "button. Firing the rest anyway; expect 401s if the token didn't refresh.");
@@ -912,14 +957,15 @@
     LOOP.consecFails = 0;
     LOOP.startedAt = Date.now();
     LOOP.lastRunAt = Date.now();
+    LOOP.nextAt = 0;
     LOOP.presetId = quickEl.value;
     LOOP.phase = "idle";
     LOOP.plan = null;
     S.stop = false;
     saveLoop();
-    logLine(`loop armed — ${quickEl.value} · every ${LOOP.intervalMin} min · allowance ${LOOP.allowance} rax · ` +
-      `≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · hard stop at ${LOOP_CAPS.maxCycles} cycles / ${LOOP_CAPS.maxHours}h / ` +
-      `${LOOP_CAPS.maxConsecFails} failed cycles.`);
+    logLine(`loop armed — ${quickEl.value} · ${fmtRax(loopRemaining())} rax allowance · a random ` +
+      `${LOOP.intervalMin}\u2013${LOOP.intervalMax} min wait between cycles · ≤${DEFAULTS.maxCards} cards / ≤${DEFAULTS.maxSpend} rax a run · ` +
+      `hard stop at ${LOOP_CAPS.maxCycles} cycles / ${LOOP_CAPS.maxHours}h / ${LOOP_CAPS.maxConsecFails} failed cycles.`);
     loopCycle();
   }
 
@@ -930,12 +976,16 @@
     if (!st) return;
     LOOP.intervalMin = Math.min(LOOP_CAPS.maxIntervalMin,
       Math.max(LOOP_CAPS.minIntervalMin, Number(st.intervalMin) || LOOP_CAPS.defaultIntervalMin));
+    LOOP.intervalMax = Math.max(LOOP.intervalMin,
+      Math.min(LOOP_CAPS.maxIntervalMin, Number(st.intervalMax) || LOOP_CAPS.defaultIntervalMax));
     LOOP.allowance = Number(st.allowance) || LOOP_CAPS.defaultAllowance;
     LOOP.committed = Number(st.committed) || 0;
+    LOOP.cards = Number(st.cards) || 0;
     LOOP.cycles = Number(st.cycles) || 0;
     LOOP.consecFails = Number(st.consecFails) || 0;
     LOOP.startedAt = Number(st.startedAt) || 0;
     LOOP.lastRunAt = Number(st.lastRunAt) || 0;
+    LOOP.nextAt = Number(st.nextAt) || 0;
     LOOP.plan = st.plan || null;
     // Restore the Quick Search the loop was armed on. A reload — including the
     // one the primer causes — otherwise leaves the panel unselected, and the
@@ -965,10 +1015,11 @@
     }
     if (!st.on) return;
     LOOP.on = true;
-    const due = LOOP.lastRunAt + LOOP.intervalMin * 60000;
+    const due = LOOP.nextAt || (LOOP.lastRunAt + loopWaitMs());
     const wait = Math.max(3000, due - Date.now());
     logLine(`loop: armed and resuming — next cycle in ${Math.max(1, Math.round(wait / 60000))} min · ` +
-      `${LOOP.committed} / ${LOOP.allowance} rax committed · cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}.`);
+      `${fmtRax(loopRemaining())} rax left of ${fmtRax(LOOP.allowance)} · ${LOOP.cards} card(s) bid · ` +
+      `cycle ${LOOP.cycles}/${LOOP_CAPS.maxCycles}.`);
     loopSchedule(wait);
   }
 
@@ -1000,7 +1051,9 @@
     return String(d.message || d.error || (r.text || "").trim() || `HTTP ${r.status}`).slice(0, 120);
   };
 
-  async function executePlan(plan, log) {
+  /** `onPlaced` fires per successful bid — the loop uses it to debit its
+   * allowance (and repaint the balance) card by card, not run by run. */
+  async function executePlan(plan, log, onPlaced) {
     const ages = Date.now() - S.lastAt;
     if (S.lastAt && ages > DEFAULTS.planTtlMs) {
       log(`note: this plan is ${Math.round(ages / 60000)} min old — listings turn over, expect skips`);
@@ -1021,7 +1074,9 @@
         placed++;
         committed += p.price;
         const li = (r.data && r.data.listingInfo) || {};
-        log(`BID OK #${p.listingId} ${p.player} @ ${p.price} rax · top=${li.isTopBidder} · bids=${li.numBids}`);
+        if (onPlaced) onPlaced(p);
+        log(`BID OK #${p.listingId} ${p.player} @ ${p.price} rax · top=${li.isTopBidder} · bids=${li.numBids}` +
+          (LOOP.on ? ` · ${fmtRax(loopRemaining())} rax left of the allowance` : ""));
       } else if (skippable(r)) {
         skipped++;
         log(`skip #${p.listingId} ${p.player} — ${respMsg(r)}`);
@@ -1294,7 +1349,7 @@
 
   // ── UI ───────────────────────────────────────────────────────────────────
   let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, lastBtnEl;
-  let intervalEl, allowanceEl, primerEl, loopEl, loopBtnEl;
+  let intervalEl, intervalMaxEl, allowanceEl, primerEl, loopEl, loopBtnEl;
   /** boot() runs two or three times (readyState, DOMContentLoaded, load) — the
    * loop must only be resumed once, or every pass would arm another timer. */
   let loopResumed = false;
@@ -1372,21 +1427,35 @@
      * their price whether they win or not), not on what the loop may look at. */
     const loopRow = document.createElement("div");
     loopRow.style.cssText = "grid-column:1/-1;display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:2px";
+    const numCss = "width:56px;" + selCss();
     intervalEl = document.createElement("input");
     intervalEl.type = "number";
     intervalEl.min = String(LOOP_CAPS.minIntervalMin);
     intervalEl.max = String(LOOP_CAPS.maxIntervalMin);
     intervalEl.step = "1";
     intervalEl.value = String(LOOP.intervalMin);
-    intervalEl.title = `minutes between cycles (${LOOP_CAPS.minIntervalMin}–${LOOP_CAPS.maxIntervalMin})`;
-    intervalEl.style.cssText = "width:56px;" + selCss();
-    intervalEl.onchange = () => {
-      LOOP.intervalMin = Math.min(LOOP_CAPS.maxIntervalMin,
-        Math.max(LOOP_CAPS.minIntervalMin, Math.round(Number(intervalEl.value) || LOOP_CAPS.defaultIntervalMin)));
+    intervalEl.title = `shortest wait between cycles, in minutes (${LOOP_CAPS.minIntervalMin}–${LOOP_CAPS.maxIntervalMin})`;
+    intervalEl.style.cssText = numCss;
+    intervalMaxEl = document.createElement("input");
+    intervalMaxEl.type = "number";
+    intervalMaxEl.min = String(LOOP_CAPS.minIntervalMin);
+    intervalMaxEl.max = String(LOOP_CAPS.maxIntervalMin);
+    intervalMaxEl.step = "1";
+    intervalMaxEl.value = String(LOOP.intervalMax);
+    intervalMaxEl.title = `longest wait between cycles, in minutes — each cycle picks a random wait in between, so the cadence isn't a metronome`;
+    intervalMaxEl.style.cssText = numCss;
+    const applyInterval = () => {
+      const clamp = (v, d) =>
+        Math.min(LOOP_CAPS.maxIntervalMin, Math.max(LOOP_CAPS.minIntervalMin, Math.round(Number(v) || d)));
+      LOOP.intervalMin = clamp(intervalEl.value, LOOP_CAPS.defaultIntervalMin);
+      LOOP.intervalMax = Math.max(LOOP.intervalMin, clamp(intervalMaxEl.value, LOOP_CAPS.defaultIntervalMax));
       intervalEl.value = String(LOOP.intervalMin);
+      intervalMaxEl.value = String(LOOP.intervalMax);
       saveLoop();
       render();
     };
+    intervalEl.onchange = applyInterval;
+    intervalMaxEl.onchange = applyInterval;
     allowanceEl = document.createElement("input");
     allowanceEl.type = "number";
     allowanceEl.min = "0";
@@ -1412,12 +1481,14 @@
     primerLbl.append(primerEl, document.createTextNode("primer"));
     loopBtnEl = btn("Arm loop", () => loopArm(), "background:#26364f;color:#dce8f8;");
     loopRow.append(
-      labeled("every"), intervalEl, labeled("min ·"), labeled("allowance"), allowanceEl, labeled("rax"),
+      labeled("every"), intervalEl, labeled("\u2013"), intervalMaxEl, labeled("min \u00b7"),
+      labeled("allowance"), allowanceEl, labeled("rax"),
       primerLbl, loopBtnEl,
       btn("Reset allowance", () => {
         LOOP.committed = 0;
+        LOOP.cards = 0;
         saveLoop();
-        logLine("loop: allowance reset — 0 rax committed.");
+        logLine(`loop: allowance reset — ${fmtRax(LOOP.allowance)} rax available again, 0 cards bid.`);
         render();
       }),
       btn("Primer report", () => primerReport()),
@@ -1623,6 +1694,7 @@
       loopBtnEl.style.background = LOOP.on ? "#3b2233" : "#26364f";
     }
     if (intervalEl && document.activeElement !== intervalEl) intervalEl.value = String(LOOP.intervalMin);
+    if (intervalMaxEl && document.activeElement !== intervalMaxEl) intervalMaxEl.value = String(LOOP.intervalMax);
     if (allowanceEl && document.activeElement !== allowanceEl) allowanceEl.value = String(LOOP.allowance);
     logEl.textContent = S.log.join("\n");
     logEl.scrollTop = logEl.scrollHeight;
