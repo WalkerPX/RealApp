@@ -186,15 +186,31 @@ stay: ≤50 cards and ≤1000 rax a cycle, with the allowance sitting above them
 
 Bids need a page-minted Turnstile token (~5 min TTL, and the page only mints one
 when it makes a write of its own), so any loop cadence carries a stale token —
-the **primer** (on by default) once a cycle navigates to the cheapest target and
-clicks the page's own Buy Now: that mints a token *and* places that one bid, and
-the rest of the plan fires on the token the click produced. It clicks in place
-if the listing is already on the page, and otherwise navigates to
-`PRIMER.route(listingId)`. The click matches button TEXT
-(`PRIMER.buyNowText` / `confirmText`) and the route tuple is a guess — those two
-are the fragile parts: if Real re-labels its buttons the log says "no Buy Now
-button found", and **Primer report** dumps every clickable element on the page so
-the patterns can be corrected against reality.
+the **primer** (on by default) once a cycle mints one by clicking the page's own
+Buy Now: in place when the listing is already on the page, otherwise after
+navigating to `PRIMER.route(listingId)` (verified: listing 1454281451 →
+`/VVtaFVFra9A1D`, titled "Marketplace Listing 90 Rax | Jalen Brunson NBA Play…").
+
+It matches **text, not markup**, because Real's listing page renders *zero*
+`<button>`, `<a>` or `[role=button]` outside this panel — the control is a plain
+clickable div. So `clickCandidates()` scans every element and keeps the ones that
+look interactive (real controls, `role=button`, `tabindex`, an `onclick`, or a
+`pointer` cursor), and `PRIMER.buyNowText` matches the visible text, preferring an
+exact `"buy now"` hit and then the shortest one, so a wrapper containing the
+button can never win. Anything inside the panel is excluded — the panel has a
+`Bid these 1 (90 rax)` button that is one regex away from being mistaken for
+Real's.
+
+**Primer report** dumps the page's real controls, its pointer-cursor leaves, and
+every leaf mentioning buy/bid/offer/rax — that is what to send if the primer logs
+`no Buy Now button found`.
+
+Two jsdom suites cover this headlessly (`/tmp/walkr-test/run.cjs` for the loop,
+`primer.cjs` for the primer): dry-run plans and spends nothing, a small allowance
+refuses to bid, LIVE bids at the buy-now price and debits the balance, a spent
+allowance refuses to re-arm, the cadence lands inside `[min, max]`, and the
+primer finds/clicks a div-based Buy Now while ignoring both a decoy and its own
+panel.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
 preset's id and the next-cycle timestamp — the primer reloads the page, and

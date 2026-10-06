@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.5.2
+// @version      0.5.3
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -519,12 +519,18 @@
   const TOKEN_FRESH_S = 240;
   const LOOP_KEY = "walkr.autobid.loop.v1";
 
-  /** The priming click — the fragile half. It leans on Real's own markup by
-   * matching button TEXT, and "Primer report" dumps what is actually clickable
-   * on the page so these two patterns can be corrected against reality. */
+  /** The priming click — the fragile half. It matches button TEXT rather than
+   * markup, because the listing page renders its Buy Now as a plain clickable
+   * element with no role (verified: zero <button>/<a>/[role=button] on it), and
+   * "Primer report" dumps what is actually clickable so these can be corrected
+   * against reality. Prefix match, not exact — the button may read
+   * "Buy Now · 90 Rax" — with findClickable preferring an exact hit and then the
+   * shortest one, so a wrapper containing the button can never win. */
   const PRIMER = {
-    buyNowText: /^(buy ?now|buy|bid)$/i,
-    confirmText: /^(confirm|confirm bid|place bid|buy ?now|yes|ok|continue)$/i,
+    buyNowText: /^(buy ?now|buy|bid)\b/i,
+    confirmText: /^(confirm|place bid|buy ?now|yes|ok|continue)\b/i,
+    buyNowExact: "buy now",
+    confirmExact: "confirm",
     findWaitMs: 12000,
     settleMs: 9000,
     /** Where the primer navigates when the target listing is NOT already on the
@@ -806,12 +812,43 @@
    * being taken for Real's Buy Now.) */
   const inPanel = (el) => !!(panel && panel.contains(el));
 
-  function findClickable(re, root) {
-    for (const el of (root || document).querySelectorAll('button,[role="button"],a,input[type="submit"]')) {
-      const t = (el.textContent || el.value || "").trim();
-      if (t && re.test(t) && isVisible(el) && !el.disabled && !inPanel(el)) return el;
+  /** Anything plausibly clickable: real controls, ARIA buttons, and — the case
+   * the listing page actually uses — plain elements styled as buttons (cursor:
+   * pointer / tabindex) with no role at all. Verified live: the listing page
+   * renders ZERO <button>/<a>/[role=button] outside this panel. */
+  function clickCandidates(root) {
+    // Every element, not a tag whitelist: the listing page's controls have no
+    // role and no tag we could have guessed. Runs once or twice a cycle, so the
+    // full scan is affordable.
+    const all = root ? [...root.querySelectorAll("*")] : [...document.querySelectorAll("*")];
+    const out = [];
+    for (const el of all) {
+      if (!isVisible(el) || el.disabled || inPanel(el)) continue;
+      if (el.tagName === "BUTTON" || el.tagName === "A" || el.tagName === "INPUT") { out.push(el); continue; }
+      if (el.getAttribute("role") === "button" || el.hasAttribute("tabindex") || el.hasAttribute("onclick")) { out.push(el); continue; }
+      let cs = null;
+      try { cs = getComputedStyle(el); } catch (_) {}
+      if (cs && cs.cursor === "pointer") out.push(el);
     }
-    return null;
+    return out;
+  }
+
+  /** The best match: an exact-text hit first, then the shortest one — shortest,
+   * because a wrapper's text also contains the button's, and clicking the
+   * wrapper instead of the button is what makes a blind primer feel flaky. */
+  function findClickable(re, root, exact) {
+    const want = (exact || "").toLowerCase();
+    const norm = (el) => (el.textContent || "").trim().replace(/\s+/g, " ");
+    const hits = clickCandidates(root).filter((el) => {
+      const t = norm(el);
+      return t && t.length <= 32 && re.test(t);
+    });
+    hits.sort((a, b) => {
+      const ea = norm(a).toLowerCase() === want ? 0 : 1;
+      const eb = norm(b).toLowerCase() === want ? 0 : 1;
+      return ea - eb || norm(a).length - norm(b).length;
+    });
+    return hits[0] || null;
   }
 
   /** If the page already shows this listing, its own Buy Now is right there —
@@ -827,25 +864,54 @@
       if (!hay.includes(needle)) continue;
       let box = c;
       for (let i = 0; i < 5 && box; i++, box = box.parentElement) {
-        const b = findClickable(PRIMER.buyNowText, box);
+        const b = findClickable(PRIMER.buyNowText, box, PRIMER.buyNowExact);
         if (b) return b;
       }
     }
     return null;
   }
 
+  /** One line describing an element, for the report. */
+  function describeEl(el) {
+    const cls = typeof el.className === "string" && el.className.trim()
+      ? ` .${el.className.trim().split(/\s+/).slice(0, 2).join(".")}` : "";
+    const attrs = ["aria-label", "data-testid", "data-cy", "title", "href", "tabindex", "role"]
+      .map((a) => (el.getAttribute(a) ? ` ${a}="${String(el.getAttribute(a)).slice(0, 28)}"` : ""))
+      .join("");
+    const own = [...el.childNodes].filter((n) => n.nodeType === 3)
+      .map((n) => n.textContent.trim()).join(" ").replace(/\s+/g, " ").slice(0, 40);
+    const text = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 44);
+    let cursor = "";
+    try { cursor = getComputedStyle(el).cursor === "pointer" ? " pointer" : ""; } catch (_) {}
+    return `   <${el.tagName.toLowerCase()}${cls}${attrs}>${cursor ? " [pointer]" : ""} own="${own}" text="${text}"`;
+  }
+
   /** Blind part of the primer: dump what is actually clickable here, so the two
-   * text patterns above can be corrected against the real page. The panel's own
-   * buttons are filtered out — they are never candidates. */
+   * text patterns can be corrected against the real page. Three passes, because
+   * the listing page turns out to use none of the obvious markup — no <button>,
+   * no <a>, no role=button. The panel's own controls are always excluded. */
   function primerReport() {
-    const all = [...document.querySelectorAll('button,[role="button"],a')].filter(isVisible);
-    const els = all.filter((el) => !inPanel(el));
-    logLine(`primer report — ${els.length} clickable element(s) on ${location.pathname}` +
-      (all.length - els.length ? ` (${all.length - els.length} of them this panel's own, ignored)` : "") + ":");
-    for (const el of els.slice(0, 40)) {
-      const t = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 48);
-      if (t) logLine(`   <${el.tagName.toLowerCase()}> "${t}"`);
-    }
+    const all = [...document.querySelectorAll("button,[role='button'],a,input,div,span,p,li,label")].filter(isVisible);
+    const mine = all.filter(inPanel).length;
+    const page = all.filter((el) => !inPanel(el));
+    logLine(`primer report — ${location.pathname}: ${page.length} visible element(s) outside this panel` +
+      (mine ? ` (${mine} of this panel's ignored)` : "") + ".");
+
+    const controls = page.filter((el) => ["BUTTON", "A", "INPUT"].includes(el.tagName) ||
+      el.getAttribute("role") === "button");
+    logLine(`   — ${controls.length} real control(s) —`);
+    for (const el of controls.slice(0, 12)) logLine(describeEl(el));
+
+    let pointer = [];
+    try {
+      pointer = page.filter((el) => getComputedStyle(el).cursor === "pointer" && !el.querySelector("*"));
+    } catch (_) {}
+    logLine(`   — ${pointer.length} leaf element(s) with a pointer cursor —`);
+    for (const el of pointer.slice(0, 20)) logLine(describeEl(el));
+
+    const words = page.filter((el) => el.children.length === 0 && /buy|bid|offer|purchase|rax/i.test(el.textContent || ""));
+    logLine(`   — ${words.length} leaf element(s) mentioning buy/bid/offer/rax —`);
+    for (const el of words.slice(0, 20)) logLine(describeEl(el));
     render();
   }
 
@@ -857,7 +923,7 @@
     let el = null;
     const t0 = Date.now();
     while (Date.now() - t0 < PRIMER.findWaitMs && !S.stop) {
-      el = findClickable(PRIMER.buyNowText);
+      el = findClickable(PRIMER.buyNowText, null, PRIMER.buyNowExact);
       if (el) break;
       await sleep(500);
     }
@@ -872,7 +938,7 @@
     logLine(`primer: clicking "${elText(el)}"`);
     try { el.click(); } catch (e) { logLine(`primer: the click threw — ${e.message}`); return false; }
     await sleep(1800);
-    const c = findClickable(PRIMER.confirmText);
+    const c = findClickable(PRIMER.confirmText, null, PRIMER.confirmExact);
     if (c && c !== el) {
       logLine(`primer: confirming via "${elText(c)}"`);
       try { c.click(); } catch (_) {}
