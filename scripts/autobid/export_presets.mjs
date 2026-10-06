@@ -62,11 +62,12 @@ function budgetPresets() {
   return out;
 }
 
-/** max-searches.ts has the budget shape but no ceiling and no playerCaps: the
- * Optimal MAX presets are searched unpriced, so they carry no `maxRpr` and the
- * extension falls back to its own hard cap. */
+/** max-searches.ts has the budget shape but no playerCaps. Its presets screen at
+ * MAX_SEARCH_FACTOR, so that ceiling rides along as `maxRpr` and the extension
+ * bids at the number the shop menu quotes. */
 function maxPresets() {
   const src = readFileSync(maxPath, "utf8");
+  const factor = factorIn(maxPath, "MAX_SEARCH_FACTOR");
   const out = [];
   for (const chunk of src.split(/\n\s*\{\s*\n\s*id:\s*"/).slice(1)) {
     const id = chunk.slice(0, chunk.indexOf('"'));
@@ -80,6 +81,7 @@ function maxPresets() {
       label: `Optimal MAX · ${label}`,
       sport: commonSport(slices),
       cards,
+      maxRpr: factor,
       slices: slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players })),
     });
   }
@@ -87,10 +89,12 @@ function maxPresets() {
   return out;
 }
 
-/** setup-searches.ts is the max-searches shape exactly (hand-written, no ceiling
- * and no playerCaps) — same parse, different label prefix. */
+/** setup-searches.ts is the max-searches shape exactly (hand-written, no
+ * playerCaps) — same parse, same `maxRpr` from SETUP_SEARCH_FACTOR, different
+ * label prefix. */
 function setupPresets() {
   const src = readFileSync(setupPath, "utf8");
+  const factor = factorIn(setupPath, "SETUP_SEARCH_FACTOR");
   const out = [];
   for (const chunk of src.split(/\n\s*\{\s*\n\s*id:\s*"/).slice(1)) {
     const id = chunk.slice(0, chunk.indexOf('"'));
@@ -104,6 +108,7 @@ function setupPresets() {
       label: `Optimal Setup · ${label}`,
       sport: commonSport(slices),
       cards,
+      maxRpr: factor,
       slices: slices.map((s) => ({ sport: s.sport, season: s.season, players: s.players })),
     });
   }
@@ -164,6 +169,16 @@ function lowPerRax() {
 function commonSport(slices) {
   const set = new Set(slices.map((s) => s.sport));
   return set.size === 1 ? [...set][0] : "all";
+}
+
+/** The screening ceiling a family's lib file declares (e.g. SETUP_SEARCH_FACTOR).
+ * Baked in as the preset's `maxRpr` so the extension screens at the same number
+ * the shop menu quotes — without it the extension falls back to SCRIPT_CAPS
+ * (11) and quietly bids looser/tighter than the menu says. */
+function factorIn(path, constName) {
+  const m = new RegExp(`${constName}\\s*=\\s*(\\d+)`).exec(readFileSync(path, "utf8"));
+  if (!m) throw new Error(`${constName} not found in ${path}`);
+  return Number(m[1]);
 }
 
 const presets = [

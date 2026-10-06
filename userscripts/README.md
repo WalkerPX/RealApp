@@ -152,8 +152,10 @@ It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts), `MAX_SEARCH_PRESETS`
 (lib/max-searches.ts), `SETUP_SEARCH_PRESETS` (lib/setup-searches.ts),
 `DAILY_PACK_PRESETS` (lib/daily-pack-searches.ts) and `LOW_PERRAX_SLICES`
 (lib/deals.ts), so the dropdown and Walkr's Menu can't drift apart. Optimal MAX
-and Optimal Setup presets ship no `maxRpr` — the menu screens them at the Daily
-Pack ceiling (21), the extension still screens at its own `SCRIPT_CAPS.maxRpr`.
+and Optimal Setup presets carry `maxRpr` parsed straight out of `MAX_SEARCH_FACTOR`
+/ `SETUP_SEARCH_FACTOR` (21), the same ceiling the shop menu screens them at —
+without it the extension fell back to `SCRIPT_CAPS.maxRpr` (11) and the panel
+quoted 11 for a lineup the menu had searched at 21.
 
 ### Per-preset rax/rating ceilings
 
