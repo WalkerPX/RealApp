@@ -22,11 +22,19 @@ import {
   espnTeamsByName,
   nflScore,
 } from "./nfl";
+import { footballStats } from "./stat-prefs";
 
 export interface NflOutput {
   day: string;
   cards: DashboardCard[];
-  candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean }[];
+  candidates: {
+    passId: number;
+    role: PlayerRole;
+    score: number;
+    boosted?: boolean;
+    statPrefs?: string[];
+    strictStats?: boolean;
+  }[];
 }
 
 function findEspnAthlete(
@@ -227,6 +235,8 @@ export async function buildNflDashboard(
         role: "hitter",
         score,
         boosted: pass.boostInfo.isCardBoosted === true,
+        statPrefs: footballStats("nfl", pass.infoDetail, ath.pos),
+        strictStats: true,
       });
     }
   }

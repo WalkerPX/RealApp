@@ -41,11 +41,12 @@ export interface NhlOutput {
 
 /** Real's hockey booster stat keys — read off the live booster inventory and
  * the web bundle's stat enum: 1 PTS · 2 GOAL · 3 AST · 24 SV · 24_61 SV+BLKS ·
- * 26 SHO · 27 W. Goalies can't earn goals and skaters can't earn saves, so
- * both sides are strict (no unrelated-stat last resort). A blocked shot is a
- * skater stat, so SV+BLKS stays on the skater list — last, since it's worth far
- * less to a forward than a goal or an assist. */
-const SKATER_STATS = ["2", "1", "3", "24_61"];
+ * 26 SHO · 27 W · 60_63 HITS+TKA. Goalies can't earn goals and skaters can't
+ * earn saves, so both sides are strict (no unrelated-stat last resort). A
+ * blocked shot is a skater stat, so SV+BLKS stays on the skater list — last,
+ * since it's worth far less to a forward than a goal or an assist. HITS+TKA
+ * sits below AST (both are frequent for power forwards, worth less per unit). */
+const SKATER_STATS = ["2", "1", "3", "60_63", "24_61"];
 const GOALIE_STATS = ["24", "24_61", "26", "27"];
 
 function findEspnAthlete(

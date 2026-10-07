@@ -19,11 +19,19 @@ import {
   espnTeamsByName,
   wnbaScore,
 } from "./wnba";
+import { hoopsStats } from "./stat-prefs";
 
 export interface WnbaOutput {
   day: string;
   cards: DashboardCard[];
-  candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean }[];
+  candidates: {
+    passId: number;
+    role: PlayerRole;
+    score: number;
+    boosted?: boolean;
+    statPrefs?: string[];
+    strictStats?: boolean;
+  }[];
 }
 
 function normName(s: string): string {
@@ -212,6 +220,8 @@ export async function buildWnbaDashboard(
         role: "hitter",
         score,
         boosted: pass.boostInfo.isCardBoosted === true,
+        statPrefs: hoopsStats(pass.infoDetail, ath.pos),
+        strictStats: true,
       });
     }
   }

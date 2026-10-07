@@ -24,11 +24,19 @@ import {
   espnTeamsByName,
   cfbScore,
 } from "./cfb";
+import { footballStats } from "./stat-prefs";
 
 export interface CfbOutput {
   day: string;
   cards: DashboardCard[];
-  candidates: { passId: number; role: PlayerRole; score: number; boosted?: boolean }[];
+  candidates: {
+    passId: number;
+    role: PlayerRole;
+    score: number;
+    boosted?: boolean;
+    statPrefs?: string[];
+    strictStats?: boolean;
+  }[];
   /** Compact trace of the Real-slate → ESPN → roster join. Rendered by the UI
    * when the CFB tab comes up empty, so an empty tab always says why (empty
    * slate? unmapped team? ESPN feed down? nobody matched?). */
@@ -277,6 +285,8 @@ export async function buildCfbDashboard(
         role: "hitter",
         score,
         boosted: pass.boostInfo.isCardBoosted === true,
+        statPrefs: footballStats("cfb", pass.infoDetail, ath.pos),
+        strictStats: true,
       });
     }
   }
