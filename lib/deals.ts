@@ -36,8 +36,10 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   // 2026-27). 2026-27 (param 2027) has no cards until the season launches.
   ncaam: [2026, 2025, 2024],
   nfl: [2025, 2024, 2023],
-  // NHL keys by STARTING year (2025 = 2025-26); 2026-27 has no cards yet.
-  nhl: [2025, 2024, 2023],
+  // NHL keys by STARTING year (2026 = 2026-27, live since Oct 2026;
+  // 2025 = 2025-26). Verified live listings: current season has bulk
+  // rare→legendary and thousands of play cards; 2022-23 (2022) has none.
+  nhl: [2026, 2025, 2024, 2023],
   // FC keys by STARTING year (2026 = 2026-27, opened Sep 2026; 2025 = 2025-26).
   soccer: [2026, 2025],
 };
@@ -48,6 +50,7 @@ export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
   mlb: 2026,
   wnba: 2026,
   ncaaf: 2026,
+  nhl: 2026,
 };
 
 export const RARITY_LABELS: Record<number, string> = {
@@ -145,7 +148,8 @@ export const WALKER_ACTIVE_SLICES: WalkerOtdSlice[] = [
 
 /** Pinned menu slices: listed at the TOP of the tracked-player menu, but kept
  * out of the wlkr OTD bulk sweep (these are live-season players — no OTD claim
- * dates exist for them yet). CFB 2026-27 is the everyday watch set. */
+ * dates exist for them yet). CFB 2026-27 is the everyday watch set; NHL 2026-27
+ * is the whole NHL set Walker holds for the new season (64 player cards). */
 export const WALKER_TRACKED_TOP_SLICES: WalkerOtdSlice[] = [
   {
     sport: "ncaaf",
@@ -163,6 +167,76 @@ export const WALKER_TRACKED_TOP_SLICES: WalkerOtdSlice[] = [
       "Marcellous Hawkins Jr",
       "Josh Hoover",
       "Turbo Richard",
+    ],
+  },
+  {
+    sport: "nhl",
+    season: 2026,
+    players: [
+      "Adam Fantilli",
+      "Adrian Kempe",
+      "Aleksander Barkov",
+      "Alex DeBrincat",
+      "Alex Tuch",
+      "Andrei Vasilevskiy",
+      "Anthony Cirelli",
+      "Auston Matthews",
+      "Bo Horvat",
+      "Brady Tkachuk",
+      "Brandon Hagel",
+      "Brayden Point",
+      "Brock Nelson",
+      "Cale Makar",
+      "Cole Caufield",
+      "Connor Bedard",
+      "Connor McDavid",
+      "Cutter Gauthier",
+      "David Pastrnak",
+      "Dylan Cozens",
+      "Dylan Guenther",
+      "Dylan Larkin",
+      "Evan Bouchard",
+      "Filip Forsberg",
+      "Jack Eichel",
+      "Jack Hughes",
+      "Jake Guentzel",
+      "Jason Robertson",
+      "John Carlson",
+      "John Tavares",
+      "Juraj Slafkovský",
+      "Kirill Kaprizov",
+      "Kyle Connor",
+      "Lane Hutson",
+      "Leo Carlsson",
+      "Leon Draisaitl",
+      "Logan Cooley",
+      "Macklin Celebrini",
+      "Mark Scheifele",
+      "Martin Necas",
+      "Matt Boldy",
+      "Matthew Tkachuk",
+      "Mika Zibanejad",
+      "Mikko Rantanen",
+      "Mitch Marner",
+      "Nathan MacKinnon",
+      "Nick Suzuki",
+      "Nico Hischier",
+      "Nikita Kucherov",
+      "Pavel Dorofeyev",
+      "Rasmus Dahlin",
+      "Robert Thomas",
+      "Sam Bennett",
+      "Sam Reinhart",
+      "Sebastian Aho",
+      "Sidney Crosby",
+      "Tage Thompson",
+      "Tim Stützle",
+      "Tomas Hertl",
+      "Victor Hedman",
+      "Vincent Trocheck",
+      "William Nylander",
+      "Wyatt Johnston",
+      "Zach Werenski",
     ],
   },
 ];

@@ -241,9 +241,11 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
   const [auctions, setAuctions] = useState(true);
   const [checked, setChecked] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  // The tools window's tabs: quick searches (presets, scans, player picker)
-  // and the OTD Earnings ledger.
-  const [menuTab, setMenuTab] = useState<"quick" | "earnings">("quick");
+  // The tools window's tabs: quick searches (presets, scans), the tracked-player
+  // picker — its own tab, so "which players am I scanning?" is one click away
+  // instead of a list at the bottom of the searches page — and the OTD Earnings
+  // ledger.
+  const [menuTab, setMenuTab] = useState<"quick" | "players" | "earnings">("quick");
   const [running, setRunning] = useState(false);
   const [runMode, setRunMode] = useState<
     "market" | "otd" | "active" | "budget" | "daily pack" | "max" | "setup" | null
@@ -1001,6 +1003,16 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
               <button
                 type="button"
                 role="tab"
+                aria-selected={menuTab === "players"}
+                className={`seg-btn ${menuTab === "players" ? "on" : ""}`}
+                onClick={() => setMenuTab("players")}
+                title="Tick the players the scans should search — your own cards, sport by sport"
+              >
+                Players
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={menuTab === "earnings"}
                 className={`seg-btn ${menuTab === "earnings" ? "on" : ""}`}
                 onClick={() => setMenuTab("earnings")}
@@ -1246,30 +1258,77 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                 </div>
                 <p className="muted-note modal-hint">
                   The presets flip the filters behind this window; the scans read the players
-                  picked below. Optimal Budget buttons carry their own lineup instead.
+                  picked in the Players tab. Optimal Budget buttons carry their own lineup instead.
                 </p>
-                <div className="modal-body">
-                  {collection ? (
-                    <>
-                      <div className="sport-tabs" role="tablist" aria-label="Sport">
-                        {collection.map((s) => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            role="tab"
-                            aria-selected={collectionSport === s.id}
-                            className={`sport-pill tab ${
-                              collectionSport === s.id ? "active" : ""
-                            }`}
-                            onClick={() => setCollectionSport(s.id)}
-                          >
-                            {s.label}
-                            <span className="count">{s.count}</span>
-                          </button>
-                        ))}
-                      </div>
-                      {(collection.find((s) => s.id === collectionSport)?.seasons ?? []).map(
-                        (sg) => (
+              </>
+            ) : menuTab === "players" ? (
+              <div className="modal-body">
+                {collection ? (
+                  <>
+                    <div className="sport-tabs" role="tablist" aria-label="Sport">
+                      {collection.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={collectionSport === s.id}
+                          className={`sport-pill tab ${
+                            collectionSport === s.id ? "active" : ""
+                          }`}
+                          onClick={() => setCollectionSport(s.id)}
+                        >
+                          {s.label}
+                          <span className="count">{s.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {(collection.find((s) => s.id === collectionSport)?.seasons ?? []).map(
+                      (sg) => (
+                        <div key={sg.season} className="menu-season">
+                          <div className="menu-season-label">{sg.label}</div>
+                          <div className="menu-players">
+                            {sg.players.map((p) => {
+                              const on = checked.includes(p.key);
+                              return (
+                                <label
+                                  key={p.key}
+                                  className={`menu-player ${on ? "on" : ""}`}
+                                  title={`${p.rarityLabel}${
+                                    p.level ? ` · level ${p.level}` : ""
+                                  }${p.copies > 1 ? ` · ${p.copies} copies` : ""}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={() => toggleChecked(p.key)}
+                                  />
+                                  {p.name}
+                                  <span
+                                    className="rarity-chip"
+                                    style={{ color: rarityColor(p.rarityLabel) }}
+                                  >
+                                    {p.rarityLabel}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {collectionErr && (
+                      <p className="muted-note">
+                        Couldn&apos;t read your own card list ({collectionErr}) — showing the
+                        built-in wlkr OTD list instead.
+                      </p>
+                    )}
+                    {OTD_MENU.map((g) => (
+                      <section key={g.sport} className="menu-sport">
+                        <h3 className="menu-sport-title">{g.label}</h3>
+                        {g.seasons.map((sg) => (
                           <div key={sg.season} className="menu-season">
                             <div className="menu-season-label">{sg.label}</div>
                             <div className="menu-players">
@@ -1279,9 +1338,6 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                                   <label
                                     key={p.key}
                                     className={`menu-player ${on ? "on" : ""}`}
-                                    title={`${p.rarityLabel}${
-                                      p.level ? ` · level ${p.level}` : ""
-                                    }${p.copies > 1 ? ` · ${p.copies} copies` : ""}`}
                                   >
                                     <input
                                       type="checkbox"
@@ -1289,60 +1345,17 @@ export default function ShopPanel({ openMenuSeq = 0, earningsTab }: ShopPanelPro
                                       onChange={() => toggleChecked(p.key)}
                                     />
                                     {p.name}
-                                    <span
-                                      className="rarity-chip"
-                                      style={{ color: rarityColor(p.rarityLabel) }}
-                                    >
-                                      {p.rarityLabel}
-                                    </span>
                                   </label>
                                 );
                               })}
                             </div>
                           </div>
-                        )
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {collectionErr && (
-                        <p className="muted-note">
-                          Couldn&apos;t read your own card list ({collectionErr}) — showing the
-                          built-in wlkr OTD list instead.
-                        </p>
-                      )}
-                      {OTD_MENU.map((g) => (
-                        <section key={g.sport} className="menu-sport">
-                          <h3 className="menu-sport-title">{g.label}</h3>
-                          {g.seasons.map((sg) => (
-                            <div key={sg.season} className="menu-season">
-                              <div className="menu-season-label">{sg.label}</div>
-                              <div className="menu-players">
-                                {sg.players.map((p) => {
-                                  const on = checked.includes(p.key);
-                                  return (
-                                    <label
-                                      key={p.key}
-                                      className={`menu-player ${on ? "on" : ""}`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={on}
-                                        onChange={() => toggleChecked(p.key)}
-                                      />
-                                      {p.name}
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
-                        </section>
-                      ))}
-                    </>
-                  )}
-                </div>
-              </>
+                        ))}
+                      </section>
+                    ))}
+                  </>
+                )}
+              </div>
             ) : (
               <div className="modal-body">{earningsTab}</div>
             )}
