@@ -106,6 +106,7 @@ const SPORT_TAG: Record<DealSport, string> = {
   nfl: "NFL",
   nhl: "NHL",
   soccer: "FC",
+  ufc: "UFC",
 };
 
 /** One scan unit: a sport/season slice filtered to a set of player names. */
