@@ -27,7 +27,6 @@ import {
 // multi-sport sweep is bounded by slices × this budget, not by one call.
 const MAX_ELAPSED_MS = 45_000;
 const MAX_LOOKUPS = 130; // FMV + earnings lookups per scan (~3/s of the budget)
-const MAX_BUCKET_PAGES = 200; // safety ceiling per rarity/type bucket (10/page)
 // Sequential requests only (never parallel): a rate-limit hit on Real is
 // sticky, so a small floor between requests keeps volume polite over a long
 // scan. The gap is jittered — a fixed millisecond metronome is itself a bot
@@ -219,44 +218,26 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
   } else {
     outer2: for (const ltype of f.listingTypes) {
       for (const rarity of f.rarities) {
-        let cursor: string | undefined;
-        let prevCursor = "";
-        let fetched = 0;
-        let bucketTotal = 0; // market count for this query, from the first page
-        for (let page = 0; page < MAX_BUCKET_PAGES; page++) {
-          if (over()) break outer2;
-          if (page > 0) await sleep(gap()); // jittered politeness floor between pages
-          let listings;
-          try {
-            const res = await fetchMarketplaceListings({
-              sport: f.sport,
-              season: f.season,
-              rarity,
-              listingType: ltype,
-              beforeEndsAt: cursor,
-            });
-            listings = res.listings;
-            bucketTotal = res.listingCount || bucketTotal;
-          } catch (e) {
-            // A bad sport/season slice is a config bug — abort loudly instead
-            // of skipping it as a page hiccup.
-            if (e instanceof Error && seasonErrorMessage(e.message)) throw e;
-            break; // page/rarity hiccup — move on
-          }
-          if (!listings.length) break;
-          fetched += listings.length;
-          scanned += listings.length;
-
-          for (const l of listings) await consider(l, false, ltype);
-
-          cursor = listings.reduce(
-            (m, x) => (x.endsAt && x.endsAt < m ? x.endsAt : m),
-            listings[0].endsAt ?? ""
-          );
-          if (!cursor || cursor === prevCursor) break; // exhausted / no progress
-          prevCursor = cursor;
-          if (bucketTotal > 0 && fetched >= bucketTotal) break; // bucket fully covered
+        if (over()) break outer2;
+        let listings;
+        try {
+          const res = await fetchMarketplaceListings({
+            sport: f.sport,
+            season: f.season,
+            rarity,
+            listingType: ltype,
+          });
+          listings = res.listings;
+        } catch (e) {
+          // A bad sport/season slice is a config bug — abort loudly instead
+          // of skipping it as a page hiccup.
+          if (e instanceof Error && seasonErrorMessage(e.message)) throw e;
+          continue; // bucket hiccup — try the next one
         }
+        if (!listings.length) continue;
+        scanned += listings.length;
+        for (const l of listings) await consider(l, false, ltype);
+        await sleep(gap());
       }
     }
   }

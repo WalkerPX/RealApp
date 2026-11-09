@@ -8,7 +8,7 @@
  * only that slice, time-boxed (~20s) with in-memory FMV caching.
  */
 
-export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "soccer";
+export type DealSport = "nfl" | "ncaaf" | "ncaam" | "nba" | "nhl" | "mlb" | "wnba" | "soccer" | "ufc";
 export type DealListingType = "userpassfull" | "card";
 
 export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
@@ -20,6 +20,7 @@ export const DEAL_SPORTS: { id: DealSport; label: string }[] = [
   { id: "nfl", label: "NFL" },
   { id: "nhl", label: "NHL" },
   { id: "soccer", label: "FC" },
+  { id: "ufc", label: "UFC" },
 ];
 
 /** Season per sport (API stores every season as its starting year). */
@@ -27,21 +28,28 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   // MLB verified live bulk listings: 2024-2026 (current), 2023 (1+), 2022 (5+); 2021 has none.
   mlb: [2026, 2025, 2024, 2023, 2022],
   wnba: [2026, 2025, 2024],
-  // NBA keys by ENDING year like CBB (param 2026 = the 2025-26 set). 2023
-  // (2022-23) has live listings; 2022 (2021-22) has none.
-  nba: [2026, 2025, 2024, 2023],
+  // NBA keys by ENDING year like CBB (param 2027 = the 2026-27 set, current;
+  // 2026 = 2025-26). Verified live: 2027 has 42 legendary bulk + 2.6k play
+  // listings, 2026 has 48 + 2.6k, 2023 (2022-23) is live.
+  nba: [2027, 2026, 2025, 2024, 2023],
   ncaaf: [2026, 2025, 2024, 2023],
   // CBB is keyed by ENDING year: season param 2026 = the 2025-26 set (Real
   // stores CBB as "2025-26" cards; cf. ncaaf which is starting-year 2026 =
-  // 2026-27). 2026-27 (param 2027) has no cards until the season launches.
+  // 2026-27). 2026-27 (param 2027) has no cards yet — verified 0 listings.
   ncaam: [2026, 2025, 2024],
-  nfl: [2025, 2024, 2023],
+  // NFL keys by STARTING year; 2026 is the live season (59 legendary bulk +
+  // 614 play listings), 2025/2024/2023 are complete.
+  nfl: [2026, 2025, 2024, 2023],
   // NHL keys by STARTING year (2026 = 2026-27, live since Oct 2026;
   // 2025 = 2025-26). Verified live listings: current season has bulk
-  // rare→legendary and thousands of play cards; 2022-23 (2022) has none.
+  // rare→legendary and thousands of play cards; 2022-23 (2022) has none,
+  // and 2027 (2027-28) has none yet.
   nhl: [2026, 2025, 2024, 2023],
   // FC keys by STARTING year (2026 = 2026-27, opened Sep 2026; 2025 = 2025-26).
   soccer: [2026, 2025],
+  // UFC ships as a single all-time season (param 2023 -> "All-Time"): 6
+  // legendary bulk + 808 play listings live. No season split exists.
+  ufc: [2023],
 };
 
 /** Seasons still in progress — cards have no future OTD claim dates yet, so
@@ -51,6 +59,8 @@ export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
   wnba: 2026,
   ncaaf: 2026,
   nhl: 2026,
+  nba: 2027,
+  nfl: 2026,
 };
 
 export const RARITY_LABELS: Record<number, string> = {
@@ -64,6 +74,8 @@ export const RARITY_LABELS: Record<number, string> = {
 };
 
 export function seasonLabel(sport: DealSport, season: number): string {
+  // UFC is a single all-time set — there are no season years.
+  if (sport === "ufc") return "All-Time";
   // MLB/WNBA key by calendar year.
   if (sport === "mlb" || sport === "wnba") return String(season);
   // CBB/NBA key by ending year (2026 = 2025-26); everyone else keys by start.
