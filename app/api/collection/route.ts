@@ -22,6 +22,7 @@ const SPORT_BY_API: Record<string, DealSport> = {
   nfl: "nfl",
   nhl: "nhl",
   soccer: "soccer",
+  ufc: "ufc",
 };
 
 export interface CollectionPlayer {
@@ -90,9 +91,14 @@ export async function GET(req: NextRequest) {
     >();
 
     for (const p of passes) {
-      if (p.entityType !== "player") continue;
       const sport = SPORT_BY_API[String(p.sport ?? "")];
       if (!sport) continue;
+      // UFC fighters are `team` entities (a fighter pass is credited to the
+      // team, never a player entity), so UFC is the one sport whose collection
+      // reads team passes. Elsewhere a `team` pass is a franchise card — the
+      // deals scan can't resolve it to a player, so it stays out.
+      const isFighter = sport === "ufc" && p.entityType === "team";
+      if (p.entityType !== "player" && !isFighter) continue;
       const season = Number(p.season ?? 0);
       if (!season) continue;
       const name = String(p.label ?? "").trim();

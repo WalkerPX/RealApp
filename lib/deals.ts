@@ -451,7 +451,11 @@ export interface RawListing {
   card?: {
     label?: string | null;
     entityLabel?: string | null;
-    primaryPlayer?: { displayName?: string | null } | null;
+    primaryPlayer?: {
+      displayName?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+    } | null;
     boostInfo?: { rarityLabel?: string | null; level?: number | null } | null;
     attributionInfo?: {
       metricLabel?: string | null;
@@ -468,6 +472,16 @@ export interface RawListing {
 export function listingPlayerLabel(l: RawListing): string {
   const c = l.card ?? {};
   const a = c.attributionInfo;
+  // The player a card belongs to always wins. Play cards also carry the scoring
+  // play's teams in `attributionInfo`, so reading that first labelled every
+  // WNBA/NBA/… play with its team ("Aces") instead of the player.
+  const p = c.primaryPlayer;
+  if (p) {
+    const full = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
+    if (full) return full;
+    if (p.displayName) return p.displayName;
+  }
+  if (c.label) return c.label;
   // UFC play cards carry no player at all — the "player" is whichever side of
   // the bout the play is credited to (`listing.teamId`), and the plain label is
   // just a pack number like "#359". Prefer the fighter's name.
@@ -475,17 +489,15 @@ export function listingPlayerLabel(l: RawListing): string {
     const side =
       l.teamId != null && l.teamId === a.awayTeamId
         ? a.awayTeam?.displayName
-        : a.homeTeam?.displayName;
+        : l.teamId != null && l.teamId === a.homeTeamId
+          ? a.homeTeam?.displayName
+          : null;
     if (side) return side;
-  }
-  if (l.entityType === "play") {
-    const couple = [a?.homeTeam?.displayName, a?.awayTeam?.displayName]
+    const couple = [a.homeTeam?.displayName, a.awayTeam?.displayName]
       .filter(Boolean)
       .join(" vs ");
     if (couple) return couple;
   }
-  if (c.label) return c.label;
-  if (c.primaryPlayer?.displayName) return c.primaryPlayer.displayName;
   if (c.entityLabel) return c.entityLabel;
   return `card ${l.cardId}`;
 }
