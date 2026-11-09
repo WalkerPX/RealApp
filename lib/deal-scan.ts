@@ -85,6 +85,9 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
   // off the id, and an unresolved name is worth reporting rather than
   // silently returning zero deals.
   const playerIds: number[] = [];
+  // UFC fighters resolve to `team` entities, so the listing filter has to use
+  // that type there; every other sport resolves to a `player`.
+  const filterEntityType = f.sport === "ufc" ? "team" : "player";
   if (requested.length) {
     for (const name of requested) {
       if (over()) break;
@@ -204,6 +207,7 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
               rarity,
               listingType: ltype,
               playerId: pid,
+              entityType: filterEntityType,
             });
           } catch (e) {
             if (e instanceof Error && seasonErrorMessage(e.message)) throw e;

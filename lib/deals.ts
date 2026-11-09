@@ -436,6 +436,8 @@ export interface RawListing {
   id: number;
   cardId: number;
   playerId?: number | null;
+  /** The fighter a UFC play is credited to (UFC lists `playerId: null`). */
+  teamId?: number | null;
   entityType?: string;
   rarity: number;
   endsAt?: string | null;
@@ -451,12 +453,37 @@ export interface RawListing {
     entityLabel?: string | null;
     primaryPlayer?: { displayName?: string | null } | null;
     boostInfo?: { rarityLabel?: string | null; level?: number | null } | null;
+    attributionInfo?: {
+      metricLabel?: string | null;
+      teamId?: number | null;
+      homeTeamId?: number | null;
+      awayTeamId?: number | null;
+      homeTeam?: { displayName?: string | null } | null;
+      awayTeam?: { displayName?: string | null } | null;
+    } | null;
   } | null;
 }
 
 /** Best human player label for a listing. */
 export function listingPlayerLabel(l: RawListing): string {
   const c = l.card ?? {};
+  const a = c.attributionInfo;
+  // UFC play cards carry no player at all — the "player" is whichever side of
+  // the bout the play is credited to (`listing.teamId`), and the plain label is
+  // just a pack number like "#359". Prefer the fighter's name.
+  if (a && (a.homeTeam || a.awayTeam)) {
+    const side =
+      l.teamId != null && l.teamId === a.awayTeamId
+        ? a.awayTeam?.displayName
+        : a.homeTeam?.displayName;
+    if (side) return side;
+  }
+  if (l.entityType === "play") {
+    const couple = [a?.homeTeam?.displayName, a?.awayTeam?.displayName]
+      .filter(Boolean)
+      .join(" vs ");
+    if (couple) return couple;
+  }
   if (c.label) return c.label;
   if (c.primaryPlayer?.displayName) return c.primaryPlayer.displayName;
   if (c.entityLabel) return c.entityLabel;

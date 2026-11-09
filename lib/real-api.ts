@@ -390,6 +390,14 @@ const nameKey = (s: string) =>
 /** Resolve "Ryan Browne" → the player entity id Real's own search returns.
  * Exact full-name match wins; a surname-only match is the fallback (play-card
  * labels are abbreviated, so callers may pass a bare surname). */
+/** UFC is the exception: a fighter has no `player` entity — search returns the
+ * fighter as a `team` (the bout's home/away team), and a listing's
+ * `entityType` is always `play` with `playerId: null` while `teamId` carries
+ * the fighter the play is attributed to. So a fighter filter has to be
+ * `filterEntityType=team` (verified live: team 183 → 9 legendary listings). */
+const searchTypesFor = (sport: string) =>
+  sport === "ufc" ? ["team", "player"] : ["player"];
+
 export async function searchPlayerId(
   sport: string,
   name: string
@@ -398,7 +406,10 @@ export async function searchPlayerId(
     `/search?query=${encodeURIComponent(name)}&sport=${encodeURIComponent(sport)}`,
     LIVE
   );
-  const players = (d.entities ?? []).filter((e) => e.type === "player");
+  const types = searchTypesFor(sport);
+  const players = (d.entities ?? []).filter(
+    (e) => e.type && types.includes(e.type)
+  );
   const full = (e: SearchEntity) =>
     `${e.entity?.firstName ?? ""} ${e.entity?.lastName ?? ""}`.trim();
   const want = nameKey(name);
@@ -410,20 +421,23 @@ export async function searchPlayerId(
   return first ? first.entity?.id ?? first.id ?? null : null;
 }
 
-/** Every listing a player currently has in one rarity/type bucket (exact). */
+/** Every listing a player currently has in one rarity/type bucket (exact).
+ * `entityType` is the type the name resolved to — `player` everywhere except
+ * UFC, whose fighters are `team` entities. */
 export async function fetchPlayerListings(params: {
   sport: string;
   season: number;
   rarity: number;
   listingType: string;
   playerId: number;
+  entityType?: string;
 }): Promise<MarketplacePage> {
   const q = new URLSearchParams({
     sport: params.sport,
     season: String(params.season),
     rarity: String(params.rarity),
     listingType: params.listingType,
-    filterEntityType: "player",
+    filterEntityType: params.entityType ?? "player",
     filterEntityId: String(params.playerId),
   });
   const d = await mktFetch<{ listings?: RawListing[]; listingCount?: number }>(
