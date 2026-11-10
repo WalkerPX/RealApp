@@ -116,6 +116,20 @@ bid ceiling), **Loop** (the cadence, the allowance and the primer) and
 between runs, the loop is a set-once thing, and the watcher is a different job
 entirely; side by side they made the panel noisy.
 
+**Each tab shows only its own data.** On **Consistent**, the bid run's furniture
+is hidden — the Run / Bid these / Clear log bar, the caps-and-credentials status
+block, and the shared log all disappear, and the pane takes the whole height for
+its console and list. Switch to Search or Loop and they come back.
+
+### The folded box
+
+The page no longer opens with the full panel in the corner. It opens with a
+small **Walkr's Menu** box; clicking it unfolds the panel (straight onto the
+Consistent tab), and the **–** in the header folds it back into the box. Nothing
+is remembered about being open, on purpose: a reload always lands on the box, so
+the panel never reappears across the marketplace. Folding is purely visual —
+an armed loop or watch keeps running either way.
+
 **Quick Search is a dropdown that adds.** Pick a lineup and it becomes a bubble
 under the dropdown; pick another and both run off the one allowance. Each bubble
 carries its own **×**, so a lineup is added and taken back out in the same place,
@@ -194,14 +208,20 @@ The third tab is a market watcher, and it is deliberately **not** a bidder.
   **extra players** — they ride on every sport/season the chosen searches already
   cover, or on the sport picked beside them when there is no search (`auto`
   can't inherit from nothing, so that combination refuses to arm).
-- **Every search has its own clock**: 7–15 minutes, re-rolled each time it runs.
-  Arm it and the first search goes immediately; the rest are already 7–15 minutes
-  out, so they stagger in behind it — NBA, then FC a minute or two later, then
-  MLB. Two scans are **never in flight at once**: every run goes through one
-  timer (`watchTick`), which always takes whichever search is due soonest, and a
-  search that comes due mid-scan simply waits in `WATCH.next`. A short breather
-  (40–130 s) separates the end of one run from the start of the next, so a queue
-  of due searches still reads as one-at-a-time rather than a burst.
+- **Arming runs the first pass**: every selected search once, in the order it was
+  picked, back to back **10–30 s apart** — so you get a full picture of the market
+  within a minute or two of arming.
+- **After that, every search has its own clock**: 7–15 minutes by default,
+  re-rolled each time it runs, both ends editable in the panel (`Every … – … min
+  each`). A search that comes due starts as soon as the previous scan finishes —
+  no shared cycle, no "one search per round". Two scans are **never in flight at
+  once**: every run goes through one timer (`watchTick`), which takes the first-pass
+  queue first and then whichever search is due soonest, and a search that comes
+  due mid-scan simply waits in `WATCH.next`. A 10–30 s breather separates one run
+  from the next.
+- Two runs of the same search inside 15 minutes needs a maximum of **7**, which
+  is why that field exists: 7–15 gives one or two sweeps per search per quarter
+  hour, and the arithmetic is the panel's, not a guess.
 - The **console** is a timestamped line per event: which search is running, how
   many live listings it found at the ceiling, what failed, and when the next
   sweep is due.

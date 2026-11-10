@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.7.1
+// @version      0.7.3
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling, and watches the same searches on a timer to hand back a buy list. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -56,11 +56,11 @@
 
   THE CONSISTENT TAB (NO BIDDING)
   -------------------------------
-  The third tab watches instead of buying. Choose one or more Quick Searches
-  (plus any extra players by hand) and arm it. Each search then keeps its OWN
-  clock: 7 to 15 minutes, re-rolled every time it runs, so one fires, another
-  follows a minute or two later, then the third — staggered, and never two at
-  once (runs are serialised, with a short breather between them). Every listing
+  The third tab watches instead of buying. Arm it and every selected search runs
+  once immediately, back to back 10–30 s apart; after that each search keeps its
+  OWN clock — 7 to 15 minutes by default, re-rolled every time it runs, editable
+  in the panel — and a search that comes due starts the moment the previous scan
+  finishes. Two scans are never in flight at once. Every listing
   that clears the watch ceiling lands in the list; each row is a button that
   opens that listing's buy screen in a new tab, so the purchase is still a click
   you make. "Pop out list" mirrors the list into its own window for a second
@@ -121,7 +121,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.7.1";
+    GM_info.script && GM_info.script.version) || "0.7.3";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -1738,12 +1738,17 @@
    * together. Runs are serialised through one timer and separated by a short
    * breather, so two scans can never be in flight at once. */
   const WATCH_CAPS = {
-    minIntervalMin: 7,
-    maxIntervalMin: 15,
-    /** Between the end of one search and the start of the next: long enough
-     * that two can't touch, short enough to keep the stagger feeling human. */
-    breathMinS: 40,
-    breathMaxS: 130,
+    /** What a search's own clock may be set to. The panel edits the range; these
+     * are the rails around it. */
+    minIntervalMin: 2,
+    maxIntervalMin: 60,
+    defaultIntervalMin: 7,
+    defaultIntervalMax: 15,
+    /** Between the end of one search and the start of the next: long enough that
+     * two can't touch, short enough that a due search starts as soon as the
+     * previous scan finishes — the first pass uses the same gap. */
+    breathMinS: 10,
+    breathMaxS: 30,
     maxResults: 80,
     maxLog: 400,
   };
@@ -1759,6 +1764,12 @@
     results: [],
     logLines: [],
     cycle: 0,
+    /** Each search's own 7–15 min clock, editable in the panel. */
+    intervalMin: WATCH_CAPS.defaultIntervalMin,
+    intervalMax: WATCH_CAPS.defaultIntervalMax,
+    /** The arming pass: every selected search, once, back to back 10–30 s apart.
+     * Ids are removed as they run; empty means "steady state". */
+    pass: [],
     /** presetId → epoch ms that search is next due. Each search has its own
      * clock; the runner always takes the earliest one. */
     next: {},
@@ -1787,6 +1798,7 @@
         sport: WATCH.sport, factor: WATCH.factor, results: WATCH.results,
         logLines: WATCH.logLines.slice(-120), cycle: WATCH.cycle, nextAt: WATCH.nextAt,
         next: WATCH.next, lastEndAt: WATCH.lastEndAt, breathMs: WATCH.breathMs,
+        intervalMin: WATCH.intervalMin, intervalMax: WATCH.intervalMax, pass: WATCH.pass,
       }));
     } catch (_) {}
   }
@@ -1842,7 +1854,10 @@
    * runs — a metronome is the easiest thing about a bot to spot, and Real's own
    * listings turn over on a human-ish cadence anyway. */
   function watchWaitMs() {
-    const lo = WATCH_CAPS.minIntervalMin, hi = WATCH_CAPS.maxIntervalMin;
+    const lo = Math.min(WATCH_CAPS.maxIntervalMin,
+      Math.max(WATCH_CAPS.minIntervalMin, Math.round(Number(WATCH.intervalMin) || 7)));
+    const hi = Math.max(lo, Math.min(WATCH_CAPS.maxIntervalMin,
+      Math.round(Number(WATCH.intervalMax) || 15)));
     return (lo + Math.floor(Math.random() * (hi - lo + 1))) * 60000;
   }
   const watchBreathMs = () => {
@@ -1880,7 +1895,13 @@
     for (const e of entries) if (!Number(WATCH.next[e.id])) WATCH.next[e.id] = Date.now() + watchWaitMs();
     for (const id of Object.keys(WATCH.next))
       if (!entries.some((e) => e.id === id)) delete WATCH.next[id];   // removed while armed
-    const due = watchEarliest(entries);
+    // The arming pass comes first: every selected search once, in the order it
+    // was picked, 10–30 s apart. Its own clock is already ticking underneath, so
+    // the first search of the pass leaves a 7–15 min gap behind it either way.
+    WATCH.pass = (WATCH.pass || []).filter((id) => entries.some((e) => e.id === id));
+    const queued = WATCH.pass.length
+      ? entries.find((e) => e.id === WATCH.pass[0]) : null;
+    const due = queued ? { entry: queued, t: Date.now() } : watchEarliest(entries);
     const now = Date.now();
     const floor = WATCH.lastEndAt ? WATCH.lastEndAt + WATCH.breathMs : 0;
     const at = Math.max(Number(due.t) || 0, floor);
@@ -1923,6 +1944,7 @@
       WATCH.lastEndAt = Date.now();
       WATCH.breathMs = watchBreathMs();
       WATCH.next[entry.id] = Date.now() + watchWaitMs();
+      WATCH.pass = (WATCH.pass || []).filter((id) => id !== entry.id);
     }
     if (!WATCH.on) { saveWatch(); render(); return; }
     const added = watchMerge(found);
@@ -1999,17 +2021,19 @@
     watchLogRendered = -1;
     S.stop = false;                       // a STOP from a bid run mustn't kill this
     const entries = watchEntries();
-    // Every search gets its own random 7–15 min clock, except the first, which
-    // goes now — so arming produces one sweep immediately and the rest stagger
-    // in behind it instead of all becoming due at the same moment.
+    // The arming pass runs every search once, back to back; each also gets its
+    // own 7–15 min clock, so the steady state starts from the moment the pass
+    // ends instead of everything coming due at once.
     WATCH.next = {};
     for (const e of entries) WATCH.next[e.id] = Date.now() + watchWaitMs();
-    if (entries.length) WATCH.next[entries[0].id] = Date.now();
+    WATCH.pass = entries.map((e) => e.id);
     const names = entries.map((e) => e.label).join(" + ") || "typed players";
     wlog(`watch armed — ${names}` +
       (WATCH.extra.length ? ` + ${WATCH.extra.length} hand-typed name(s)` : "") +
-      ` · each search every random ${WATCH_CAPS.minIntervalMin}\u2013${WATCH_CAPS.maxIntervalMin} min, one at a time · ` +
+      ` · first pass all ${entries.length} now, ${WATCH_CAPS.breathMinS}\u2013${WATCH_CAPS.breathMaxS} s apart · ` +
+      `then each every ${WATCH.intervalMin}\u2013${WATCH.intervalMax} min, one at a time · ` +
       `ceiling ×${Math.max(1, Math.round(Number(WATCH.factor) || 21))}`);
+    if (entries.length) wlog(`first pass: ${entries.map((e) => e.label).join(" \u2192 ")}`);
     saveWatch();
     watchTick();
   }
@@ -2025,6 +2049,9 @@
     WATCH.logLines = Array.isArray(s.logLines) ? s.logLines : [];
     WATCH.cycle = Number(s.cycle) || 0;
     WATCH.next = s.next && typeof s.next === "object" ? { ...s.next } : {};
+    WATCH.intervalMin = Number(s.intervalMin) || WATCH_CAPS.defaultIntervalMin;
+    WATCH.intervalMax = Number(s.intervalMax) || WATCH_CAPS.defaultIntervalMax;
+    WATCH.pass = Array.isArray(s.pass) ? s.pass : [];
     WATCH.lastEndAt = Number(s.lastEndAt) || 0;
     WATCH.breathMs = Number(s.breathMs) || 0;
     WATCH.phase = "idle";
@@ -2044,9 +2071,9 @@
   // ── UI ───────────────────────────────────────────────────────────────────
   let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, presetChipsEl, lastBtnEl;
   let intervalEl, intervalMaxEl, allowanceEl, primerEl, loopEl, loopBtnEl;
-  let ceilEl;
+  let ceilEl, miniEl;
   let watchEl, watchChipsEl, watchPlayersEl, watchSportEl, watchFactorEl, watchArmEl,
-    watchStatusEl, watchConsoleEl, watchListEl, watchCountEl;
+    watchStatusEl, watchConsoleEl, watchListEl, watchCountEl, watchEveryMinEl, watchEveryMaxEl;
   /** boot() runs two or three times (readyState, DOMContentLoaded, load) — the
    * loop must only be resumed once, or every pass would arm another timer. */
   let loopResumed = false;
@@ -2082,6 +2109,9 @@
     head.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111c30;border-bottom:1px solid #2a3a55;cursor:move";
     head.innerHTML = `<b style="flex:1">Walkr Autobid</b>` +
       `<span title="installed version — compare with the repo" style="color:#7f93b0">v${RUNNING_VERSION}</span>`;
+    // Fold the whole panel back into the little "Walkr's Menu" box. Always
+    // available, including mid-run: nothing stops, it just gets out of the way.
+    head.appendChild(btn("\u2013", () => hidePanel(), "padding:2px 8px;font-weight:700;"));
     // STOP is the kill switch for whatever is running — a single run and an
     // armed loop both. It also clears the loop's stored state, so a reload
     // after pressing it doesn't quietly re-arm the thing.
@@ -2114,7 +2144,14 @@
       { id: "watch", label: "Consistent", el: paneWatch },
     ];
     const paneBtns = {};
+    /** Filled in further down; showPane runs before them, so it has to tolerate
+     * the bid run's chrome not existing yet. */
+    let barEl = null;
+    /** Opens on the watcher — that is what the folded box is for — and keeps
+     * whichever tab was last looked at while the panel stays open. */
+    let activePane = "watch";
     const showPane = (id) => {
+      activePane = id;
       for (const p of panes) {
         p.el.style.display = p.id === id ? "grid" : "none";
         const b = paneBtns[p.id];
@@ -2124,6 +2161,14 @@
         b.style.borderColor = on ? "#3f6699" : "#2a3a55";
         b.style.color = on ? "#ffffff" : "#cfe0f7";
       }
+      // The bid run's own furniture — Run / Bid these / Clear log, the caps and
+      // credential readout, and the shared log — is noise on the watch tab and
+      // eats the height its list wants. Each tab shows only its own data.
+      const watching = id === "watch";
+      if (barEl) barEl.style.display = watching ? "none" : "flex";
+      if (statusEl) statusEl.style.display = watching ? "none" : "block";
+      if (logEl) logEl.style.display = watching ? "none" : "block";
+      cfg.style.flex = watching ? "1 1 auto" : "0 1 auto";
       render();
     };
     const tabBar = document.createElement("div");
@@ -2132,7 +2177,7 @@
       paneBtns[p.id] = btn(p.label, () => showPane(p.id), "padding:3px 10px;");
       tabBar.appendChild(paneBtns[p.id]);
     }
-    showPane("bid");
+    showPane(activePane);
 
     quickEl = document.createElement("select");
     // A single dropdown that ADDS: pick a lineup and it becomes a bubble below,
@@ -2212,7 +2257,16 @@
       const pick = watchEl.value;
       watchEl.value = "";
       if (!pick) return;
-      if (!WATCH.presetIds.includes(pick)) WATCH.presetIds.push(pick);
+      if (!WATCH.presetIds.includes(pick)) {
+        WATCH.presetIds.push(pick);
+        if (WATCH.on) {
+          // A search added mid-watch gets its own clock AND a turn in the pass,
+          // so it is scanned within seconds instead of waiting up to 15 minutes.
+          WATCH.next[pick] = Date.now() + watchWaitMs();
+          WATCH.pass.push(pick);
+          watchTick();
+        }
+      }
       saveWatch();
       render();
     };
@@ -2257,6 +2311,42 @@
       saveWatch();
       render();
     };
+
+    /** The per-search clock, editable — 7–15 min by default. */
+    watchEveryMinEl = document.createElement("input");
+    watchEveryMinEl.type = "number";
+    watchEveryMinEl.min = String(WATCH_CAPS.minIntervalMin);
+    watchEveryMinEl.max = String(WATCH_CAPS.maxIntervalMin);
+    watchEveryMinEl.step = "1";
+    watchEveryMinEl.value = String(WATCH.intervalMin);
+    watchEveryMinEl.title = "shortest gap between one search's own runs, in minutes";
+    watchEveryMinEl.style.cssText = "width:56px;" + selCss();
+    watchEveryMaxEl = document.createElement("input");
+    watchEveryMaxEl.type = "number";
+    watchEveryMaxEl.min = String(WATCH_CAPS.minIntervalMin);
+    watchEveryMaxEl.max = String(WATCH_CAPS.maxIntervalMin);
+    watchEveryMaxEl.step = "1";
+    watchEveryMaxEl.value = String(WATCH.intervalMax);
+    watchEveryMaxEl.title =
+      "longest gap between one search's own runs — each run re-rolls a random gap in the range. " +
+      "Two runs of the same search inside 15 minutes needs a max of 7.";
+    watchEveryMaxEl.style.cssText = "width:56px;" + selCss();
+    const everyRow = document.createElement("div");
+    everyRow.style.cssText = "display:flex;gap:6px;align-items:center";
+    everyRow.append(watchEveryMinEl, labeled("\u2013"), watchEveryMaxEl, labeled("min each"));
+    const applyEvery = () => {
+      const clamp = (v, d) => Math.min(WATCH_CAPS.maxIntervalMin,
+        Math.max(WATCH_CAPS.minIntervalMin, Math.round(Number(v) || d)));
+      WATCH.intervalMin = clamp(watchEveryMinEl.value, WATCH_CAPS.defaultIntervalMin);
+      WATCH.intervalMax = Math.max(WATCH.intervalMin,
+        clamp(watchEveryMaxEl.value, WATCH_CAPS.defaultIntervalMax));
+      watchEveryMinEl.value = String(WATCH.intervalMin);
+      watchEveryMaxEl.value = String(WATCH.intervalMax);
+      saveWatch();
+      render();
+    };
+    watchEveryMinEl.onchange = applyEvery;
+    watchEveryMaxEl.onchange = applyEvery;
 
     watchArmEl = btn("Arm watch", () => watchArm(), "background:#26364f;color:#dce8f8;");
     watchStatusEl = document.createElement("div");
@@ -2374,6 +2464,7 @@
       labeled("Extra players"), watchPlayersEl,
       labeled("Their sport"), watchSportEl,
       labeled("Watch ceiling"), watchFactorEl,
+      labeled("Every"), everyRow,
       watchArmEl, watchStatusEl,
       labeled("Console"), watchConsoleEl,
       watchCountEl, watchListEl);
@@ -2391,6 +2482,7 @@
 
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap;flex:0 0 auto";
+    barEl = bar;
     lastBtnEl = btn("Bid these", () => bidCached(), "background:#14432b;color:#b8f5cf;border-color:#1f6b45;");
     bar.append(btn("Run", () => { if (!S.running) run(); }), lastBtnEl, btn("Clear log", () => { S.log = []; render(); }));
 
@@ -2412,6 +2504,27 @@
 
     panel.append(head, cfg, bar, statusEl, logEl, grip);
     makeResizable(panel, grip);
+
+    /** The folded state: one small box, and it is what the page starts with.
+     * Clicking it opens the panel; the header's dash folds it back. Nothing is
+     * persisted about being open, on purpose — a reload always lands on the box,
+     * so the panel never reappears in the middle of the marketplace. */
+    miniEl = document.createElement("div");
+    miniEl.textContent = "Walkr's Menu";
+    miniEl.title = "open Walkr's Menu";
+    miniEl.setAttribute("role", "button");
+    miniEl.setAttribute("tabindex", "0");
+    miniEl.style.cssText = [
+      "position:fixed", "right:14px", "bottom:14px", "z-index:2147483647",
+      "display:flex", "align-items:center", "gap:6px",
+      "padding:8px 13px", "background:#111c30", "color:#e6edf7",
+      "border:1px solid #2a3a55", "border-radius:9px", "cursor:pointer",
+      "font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace",
+      "box-shadow:0 6px 18px rgba(0,0,0,.45)", "user-select:none",
+    ].join(";");
+    miniEl.onclick = () => showPanel();
+    miniEl.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showPanel(); } };
+    panel.style.display = "none";
     // A remembered size re-opens the panel exactly as it was left.
     const saved = storedSize();
     if (saved) {
@@ -2421,11 +2534,13 @@
     }
     window.addEventListener("resize", clampPanel);
     mount(panel);
+    mount(miniEl);
     if (hashPlan && hashPlan.label) {
       const match = PRESETS.find((p) => p.label === hashPlan.label);
       if (match) { setSelectedPresets([match.id]); sportEl.value = match.sport; playersEl.disabled = true; }
     }
     lastBtn();
+    showPane(activePane);   // now that the bid chrome exists, apply its visibility
     render();
   }
 
@@ -2434,6 +2549,21 @@
   function mount(el) {
     const host = document.body || document.documentElement;
     if (host) host.appendChild(el);
+  }
+
+  /** Fold out / fold back. Neither touches timers — a watch or a loop keeps
+   * running while the panel is a box in the corner. */
+  function showPanel() {
+    if (!panel || !miniEl) return;
+    miniEl.style.display = "none";
+    panel.style.display = "flex";
+    clampPanel();
+    render();
+  }
+  function hidePanel() {
+    if (!panel || !miniEl) return;
+    panel.style.display = "none";
+    miniEl.style.display = "flex";
   }
 
   function makeDraggable(el, handle) {
@@ -2693,6 +2823,7 @@
       ` \u00b7 ${names || "nothing"}` +
       (WATCH.extra.length ? ` + ${WATCH.extra.length} typed` : "") +
       ` \u00b7 \u00d7${WATCH.factor} \u00b7 ${WATCH.results.length} on the list` +
+      ` \u00b7 ${WATCH.intervalMin}\u2013${WATCH.intervalMax} min` +
       (WATCH.on ? ` \u00b7 cycle ${WATCH.cycle}` : "") +
       (WATCH.on
         ? (WATCH.phase === "running"
@@ -2753,6 +2884,8 @@
     capsEl.textContent = `caps: ${DEFAULTS.maxRpr} rax/rating${pcTxt} · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`;
     if (ceilEl && document.activeElement !== ceilEl) ceilEl.value = String(DEFAULTS.maxRpr);
     if (watchFactorEl && document.activeElement !== watchFactorEl) watchFactorEl.value = String(WATCH.factor);
+    if (watchEveryMinEl && document.activeElement !== watchEveryMinEl) watchEveryMinEl.value = String(WATCH.intervalMin);
+    if (watchEveryMaxEl && document.activeElement !== watchEveryMaxEl) watchEveryMaxEl.value = String(WATCH.intervalMax);
     if (watchSportEl && document.activeElement !== watchSportEl) watchSportEl.value = WATCH.sport;
     if (watchPlayersEl && document.activeElement !== watchPlayersEl)
       watchPlayersEl.value = WATCH.extra.join(", ");
@@ -2783,7 +2916,10 @@
       S.log.unshift("SELF-TEST FAILED — the request-token encoder is wrong, every call will 401 as \"Malformed request\".");
       render();
     }
-    setInterval(() => { if (panel && !panel.isConnected) mount(panel); }, 2000);
+    setInterval(() => {
+      if (panel && !panel.isConnected) mount(panel);
+      if (miniEl && !miniEl.isConnected) mount(miniEl);
+    }, 2000);
     setInterval(() => { if (panel && panel.isConnected) render(); }, 1000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
