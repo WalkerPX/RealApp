@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.7.0
+// @version      0.7.1
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling, and watches the same searches on a timer to hand back a buy list. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -57,13 +57,15 @@
   THE CONSISTENT TAB (NO BIDDING)
   -------------------------------
   The third tab watches instead of buying. Choose one or more Quick Searches
-  (plus any extra players by hand), arm it, and every 8–11 minutes — a fresh
-  random wait each cycle — it runs ONE of them, picked at random, and keeps
-  every listing that clears the watch ceiling in a list. Each row is a button
-  that opens that listing's buy screen in a new tab, so the purchase is still a
-  click you make. Its console shows what is running, what it found, and when
-  the next sweep is due. Nothing here bids, ever: the watch list only spends
-  when you open a row and buy.
+  (plus any extra players by hand) and arm it. Each search then keeps its OWN
+  clock: 7 to 15 minutes, re-rolled every time it runs, so one fires, another
+  follows a minute or two later, then the third — staggered, and never two at
+  once (runs are serialised, with a short breather between them). Every listing
+  that clears the watch ceiling lands in the list; each row is a button that
+  opens that listing's buy screen in a new tab, so the purchase is still a click
+  you make. "Pop out list" mirrors the list into its own window for a second
+  monitor. The console shows what is running, what it found, and when each
+  search is next due. Nothing here bids, ever.
 
   THE LOOP (UNATTENDED)
   ---------------------
@@ -119,7 +121,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.7.0";
+    GM_info.script && GM_info.script.version) || "0.7.1";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -1730,14 +1732,18 @@
   }
 
   // ── the Consistent tab: watch the market, hand back a buy list ────────────
-  /** Nothing in this block bids. Each cycle runs ONE of the chosen quick
-   * searches — picked at random, so several searches share one steady, human
-   * cadence instead of firing together — and keeps every listing that clears
-   * the watch ceiling. The list is a column of buttons: opening one is the only
-   * way any of this spends rax, and that click is yours. */
+  /** Nothing in this block bids. Each search keeps its OWN cadence — 7 to 15
+   * minutes, re-rolled every time it runs — so with three searches picked, one
+   * fires, then another a minute or two later, then the third: staggered, never
+   * together. Runs are serialised through one timer and separated by a short
+   * breather, so two scans can never be in flight at once. */
   const WATCH_CAPS = {
-    minIntervalMin: 8,
-    maxIntervalMin: 11,
+    minIntervalMin: 7,
+    maxIntervalMin: 15,
+    /** Between the end of one search and the start of the next: long enough
+     * that two can't touch, short enough to keep the stagger feeling human. */
+    breathMinS: 40,
+    breathMaxS: 130,
     maxResults: 80,
     maxLog: 400,
   };
@@ -1753,7 +1759,17 @@
     results: [],
     logLines: [],
     cycle: 0,
+    /** presetId → epoch ms that search is next due. Each search has its own
+     * clock; the runner always takes the earliest one. */
+    next: {},
+    /** "idle" | "running" — the overlap guard. One scan in flight, ever. */
+    phase: "idle",
     nextAt: 0,
+    nextLabel: "",
+    /** When the last search finished and the breather it earned, so a queue of
+     * due searches runs one at a time instead of back to back. */
+    lastEndAt: 0,
+    breathMs: 0,
     lastSearch: "",
     timer: null,
   };
@@ -1770,6 +1786,7 @@
         on: WATCH.on, presetIds: WATCH.presetIds, extra: WATCH.extra,
         sport: WATCH.sport, factor: WATCH.factor, results: WATCH.results,
         logLines: WATCH.logLines.slice(-120), cycle: WATCH.cycle, nextAt: WATCH.nextAt,
+        next: WATCH.next, lastEndAt: WATCH.lastEndAt, breathMs: WATCH.breathMs,
       }));
     } catch (_) {}
   }
@@ -1812,27 +1829,118 @@
     return targets.concat(pairs.map((p) => ({ sport: p.sport, season: p.season, players: extra })));
   }
 
-  /** A fresh random wait in [8, 11] minutes every cycle — the same reasoning as
-   * the bid loop's cadence: a metronome is the easiest thing about a bot to spot. */
+  /** The things that get their own clock: one per selected search, plus a
+   * pseudo-entry for hand-typed players when no search is selected. */
+  function watchEntries() {
+    const out = watchPresets().map((p) => ({ id: p.id, label: p.label, preset: p }));
+    if (!out.length && WATCH.extra.length)
+      out.push({ id: "__extra", label: "typed players", preset: null });
+    return out;
+  }
+
+  /** A fresh random wait in [7, 15] minutes, re-rolled every time that search
+   * runs — a metronome is the easiest thing about a bot to spot, and Real's own
+   * listings turn over on a human-ish cadence anyway. */
   function watchWaitMs() {
     const lo = WATCH_CAPS.minIntervalMin, hi = WATCH_CAPS.maxIntervalMin;
     return (lo + Math.floor(Math.random() * (hi - lo + 1))) * 60000;
   }
+  const watchBreathMs = () => {
+    const lo = WATCH_CAPS.breathMinS, hi = WATCH_CAPS.breathMaxS;
+    return (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000;
+  };
 
-  function watchSchedule(delayMs) {
+  /** The entry that is due soonest — the runner never cares about order, only
+   * about whose clock has run down first. */
+  function watchEarliest(entries) {
+    let best = null;
+    for (const e of entries) {
+      const t = Number(WATCH.next[e.id]) || 0;
+      if (!best || t < best.t) best = { entry: e, t };
+    }
+    return best;
+  }
+
+  const watchTimerClear = () => {
     if (WATCH.timer) { clearTimeout(WATCH.timer); WATCH.timer = null; }
-    if (!WATCH.on) { WATCH.nextAt = 0; saveWatch(); render(); return; }
-    WATCH.nextAt = Date.now() + delayMs;
+  };
+
+  /** One tick: work out whose turn is next, arm a timer for it, and fire it when
+   * the wait is over. Deliberately the ONLY place that starts a scan — so a
+   * search that becomes due while another is running just waits in the map
+   * instead of racing it. */
+  function watchTick() {
+    watchTimerClear();
+    if (!WATCH.on) { WATCH.nextAt = 0; WATCH.nextLabel = ""; saveWatch(); render(); return; }
+    if (WATCH.phase === "running") return;      // never two at once
+    if (S.stop) { watchStop("STOP pressed."); return; }
+    const entries = watchEntries();
+    if (!entries.length) { watchStop("nothing selected to search."); return; }
+    // A search that has no clock yet (just added to a running watch) gets one.
+    for (const e of entries) if (!Number(WATCH.next[e.id])) WATCH.next[e.id] = Date.now() + watchWaitMs();
+    for (const id of Object.keys(WATCH.next))
+      if (!entries.some((e) => e.id === id)) delete WATCH.next[id];   // removed while armed
+    const due = watchEarliest(entries);
+    const now = Date.now();
+    const floor = WATCH.lastEndAt ? WATCH.lastEndAt + WATCH.breathMs : 0;
+    const at = Math.max(Number(due.t) || 0, floor);
+    WATCH.nextAt = at || now;
+    WATCH.nextLabel = due.entry.label;
     saveWatch();
-    WATCH.timer = setTimeout(() => { WATCH.timer = null; watchCycle(); }, delayMs);
+    const wait = at - now;
+    if (wait > 250) {
+      WATCH.timer = setTimeout(() => { WATCH.timer = null; watchTick(); }, wait);
+      render();
+      return;
+    }
+    watchRun(due.entry);
+  }
+
+  /** Run one search, then put its own clock forward and hand the tick back. The
+   * `finally` is the invariant that matters: `phase` is cleared and the next
+   * tick is armed even if the scan threw. */
+  async function watchRun(entry) {
+    WATCH.phase = "running";
+    WATCH.cycle++;
+    WATCH.lastSearch = entry.label;
+    const targets = watchTargets(entry.preset);
+    const ceiling = Math.max(1, Math.round(Number(WATCH.factor) || 21));
+    const players = targets.reduce((n, t) => n + (t.players || []).length, 0);
+    wlog(`search running — ${entry.label} · ${players} player(s) · ×${ceiling} · cycle ${WATCH.cycle}`);
     render();
+    const t0 = Date.now();
+    let found = [];
+    scanCeiling = ceiling;
+    try {
+      // The per-player chatter rides in the log for a bid run; here the console
+      // only wants the search line, what it found, and anything that failed.
+      found = await scan(targets, (s) => { if (/^!/.test(s)) wlog(s); }, { watch: true });
+    } catch (e) {
+      wlog(`! search failed: ${e.message || e}`);
+    } finally {
+      scanCeiling = null;
+      WATCH.phase = "idle";
+      WATCH.lastEndAt = Date.now();
+      WATCH.breathMs = watchBreathMs();
+      WATCH.next[entry.id] = Date.now() + watchWaitMs();
+    }
+    if (!WATCH.on) { saveWatch(); render(); return; }
+    const added = watchMerge(found);
+    const secs = Math.round((Date.now() - t0) / 1000);
+    const gap = Math.max(1, Math.round((WATCH.next[entry.id] - Date.now()) / 60000));
+    wlog(`${entry.label}: ${found.length} live listing(s) at or under ${ceiling} rax/rating · ` +
+      `${added} new · ${WATCH.results.length} on the list · ${secs}s · back in ${gap} min`);
+    saveWatch();
+    watchTick();
   }
 
   function watchStop(reason) {
-    if (WATCH.timer) { clearTimeout(WATCH.timer); WATCH.timer = null; }
+    watchTimerClear();
     const was = WATCH.on;
     WATCH.on = false;
+    WATCH.phase = "idle";
     WATCH.nextAt = 0;
+    WATCH.nextLabel = "";
     if (was) wlog(`watch stopped — ${reason}`);
     saveWatch();
     render();
@@ -1866,42 +1974,6 @@
     return added;
   }
 
-  async function watchCycle() {
-    WATCH.timer = null;
-    if (!WATCH.on) return;
-    if (S.stop) { watchStop("STOP pressed."); return; }
-    const picks = watchPresets();
-    if (!picks.length && !WATCH.extra.length) { watchStop("nothing selected to search."); return; }
-    const preset = picks.length ? picks[Math.floor(Math.random() * picks.length)] : null;
-    WATCH.cycle++;
-    WATCH.lastSearch = preset ? preset.label : "typed players";
-    const targets = watchTargets(preset);
-    if (!targets.length) { watchStop("nothing to search — pick a search or a sport."); return; }
-    const ceiling = Math.max(1, Math.round(Number(WATCH.factor) || 21));
-    const players = targets.reduce((n, t) => n + (t.players || []).length, 0);
-    wlog(`search running — ${WATCH.lastSearch} · ${players} player(s) · ×${ceiling} · cycle ${WATCH.cycle}`);
-    render();
-    const t0 = Date.now();
-    let found = [];
-    scanCeiling = ceiling;
-    try {
-      // The per-player chatter rides in the log for a bid run; here the console
-      // only wants the search line, what it found, and anything that failed.
-      found = await scan(targets, (s) => { if (/^!/.test(s)) wlog(s); }, { watch: true });
-    } catch (e) {
-      wlog(`! search failed: ${e.message || e}`);
-    } finally {
-      scanCeiling = null;
-    }
-    if (!WATCH.on) return;
-    const added = watchMerge(found);
-    const secs = Math.round((Date.now() - t0) / 1000);
-    wlog(`${WATCH.lastSearch}: ${found.length} live listing(s) at or under ${ceiling} rax/rating · ` +
-      `${added} new · ${WATCH.results.length} on the list · ${secs}s`);
-    saveWatch();
-    watchSchedule(watchWaitMs());
-  }
-
   function watchArm() {
     if (WATCH.on) { watchStop("disarmed."); return; }
     const picks = watchPresets();
@@ -1920,16 +1992,26 @@
     WATCH.cycle = 0;
     WATCH.results = [];
     WATCH.logLines = [];
+    WATCH.phase = "idle";
+    WATCH.lastEndAt = 0;
+    WATCH.breathMs = 0;
     watchDirty++;
     watchLogRendered = -1;
     S.stop = false;                       // a STOP from a bid run mustn't kill this
-    const names = picks.map((p) => p.label).join(" + ") || "typed players";
+    const entries = watchEntries();
+    // Every search gets its own random 7–15 min clock, except the first, which
+    // goes now — so arming produces one sweep immediately and the rest stagger
+    // in behind it instead of all becoming due at the same moment.
+    WATCH.next = {};
+    for (const e of entries) WATCH.next[e.id] = Date.now() + watchWaitMs();
+    if (entries.length) WATCH.next[entries[0].id] = Date.now();
+    const names = entries.map((e) => e.label).join(" + ") || "typed players";
     wlog(`watch armed — ${names}` +
       (WATCH.extra.length ? ` + ${WATCH.extra.length} hand-typed name(s)` : "") +
-      ` · a random ${WATCH_CAPS.minIntervalMin}\u2013${WATCH_CAPS.maxIntervalMin} min wait between searches · ` +
+      ` · each search every random ${WATCH_CAPS.minIntervalMin}\u2013${WATCH_CAPS.maxIntervalMin} min, one at a time · ` +
       `ceiling ×${Math.max(1, Math.round(Number(WATCH.factor) || 21))}`);
     saveWatch();
-    watchCycle();
+    watchTick();
   }
 
   function watchResume() {
@@ -1942,14 +2024,21 @@
     WATCH.results = Array.isArray(s.results) ? s.results : [];
     WATCH.logLines = Array.isArray(s.logLines) ? s.logLines : [];
     WATCH.cycle = Number(s.cycle) || 0;
+    WATCH.next = s.next && typeof s.next === "object" ? { ...s.next } : {};
+    WATCH.lastEndAt = Number(s.lastEndAt) || 0;
+    WATCH.breathMs = Number(s.breathMs) || 0;
+    WATCH.phase = "idle";
     watchDirty++;
     if (!s.on) return;
     WATCH.on = true;
-    // The page was reloaded mid-wait: honour what is left of it, but never
-    // re-fire instantly (a reload loop would turn the cadence into a hammer).
-    const wait = watchWaitMs();
-    const left = Number(s.nextAt) ? Number(s.nextAt) - Date.now() : wait;
-    watchSchedule(Math.min(wait, Math.max(30000, left)));
+    // A reload must not turn the cadence into a hammer: anything that came due
+    // while the page was down is pushed 20–70 s out, and the rest keep their
+    // clocks, so the stagger survives the reload.
+    const now = Date.now();
+    for (const id of Object.keys(WATCH.next))
+      if (!Number(WATCH.next[id]) || Number(WATCH.next[id]) < now + 20000)
+        WATCH.next[id] = now + 20000 + Math.floor(Math.random() * 50000);
+    watchTick();
   }
 
   // ── UI ───────────────────────────────────────────────────────────────────
@@ -2519,20 +2608,97 @@
     return row;
   }
 
+  /** The list in its own window — same rows, same order — so the buy decisions
+   * can sit on a second monitor while the panel stays on whatever tab you were
+   * using. It is read-only: adding, clearing and arming stay in the panel, and
+   * every row is a plain link, so nothing in that window can spend by itself. */
+  let listWin = null;
+  const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function renderListWindow() {
+    if (!listWin) return;
+    if (listWin.closed) { listWin = null; return; }
+    let doc;
+    try { doc = listWin.document; } catch (_) { listWin = null; return; }
+    if (!doc || !doc.body) return;
+    const rows = WATCH.results.map((r) => {
+      const left = escHtml(
+        `${SPORT_LABEL[r.sport] || r.sport} \u00b7 ${r.player} \u00b7 ` +
+        `${RARITY_LABEL[r.rarity] || `r${r.rarity}`} \u00b7 ${fmtRax(r.price)} rax ` +
+        `(${fmtR(r.rpr)} rpr \u00b7 rating ${fmtR(r.rating)})`);
+      const right = escHtml([r.how, timeLeft(r.endsAt)].filter(Boolean).join(" \u00b7 "));
+      return `<a class="row" href="${escHtml(r.url)}" target="_blank" rel="noopener noreferrer">` +
+        `<span class="l">${left}</span><span class="r">${right}</span></a>`;
+    }).join("");
+    doc.title = `Walkr watch \u00b7 ${WATCH.results.length}`;
+    doc.body.innerHTML =
+      `<style>
+        html,body{margin:0;background:#0b1120;color:#e6edf7;
+          font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+        header{position:sticky;top:0;display:flex;gap:8px;align-items:baseline;
+          padding:10px 12px;background:#111c30;border-bottom:1px solid #2a3a55}
+        h1{font-size:13px;margin:0;flex:1;font-weight:600}
+        .meta{color:#7f93b0;font-size:11px}
+        main{display:flex;flex-direction:column;gap:5px;padding:10px 12px}
+        .row{display:flex;gap:10px;align-items:center;padding:7px 9px;border-radius:7px;
+          background:#122036;border:1px solid #2f4a72;color:#cfe0f7;text-decoration:none}
+        .row:hover{border-color:#4a7ab8;background:#16294a}
+        .l{flex:1}.r{color:#8fb0dd;white-space:nowrap;font-size:11px}
+        .empty{color:#7f93b0;padding:10px 2px}
+        footer{color:#5d6f8a;font-size:11px;padding:0 12px 12px}
+      </style>
+      <header><h1>Walkr watch \u00b7 ${WATCH.results.length} listing(s)</h1>
+        <span class="meta">${WATCH.on ? "watching" : "disarmed"} \u00b7
+        ${hhmmss()}</span></header>
+      <main>${rows || '<div class="empty">nothing on the list yet</div>'}</main>
+      <footer>Click a row to open its buy screen in a new tab. The list is managed
+        in the Walkr Autobid panel.</footer>`;
+  }
+
+  function watchPopOut() {
+    try {
+      if (listWin && !listWin.closed) { listWin.close(); listWin = null; watchDirty++; render(); return; }
+      listWin = window.open("", "walkr-watch-list", "popup,width=620,height=680");
+      if (!listWin) {
+        wlog("pop-out blocked — allow pop-ups for realapp.com, then try again.");
+        render();
+        return;
+      }
+      renderListWindow();
+      try { listWin.focus(); } catch (_) {}
+      watchDirty++;      // the button label lives in the (otherwise cached) list block
+      render();
+    } catch (e) {
+      wlog(`! pop-out failed: ${e.message || e}`);
+      render();
+    }
+  }
+
   /** The watch pane: status, console, and the list. The console and the list are
    * only rebuilt when they actually changed — render() runs once a second and
    * rebuilding eighty buttons on every tick is how a panel starts to stutter. */
   function renderWatch() {
     if (!watchListEl) return;
-    const picks = watchPresets();
-    const names = picks.map((p) => p.label).join(" + ");
-    const next = WATCH.on && WATCH.nextAt
-      ? Math.max(1, Math.ceil((WATCH.nextAt - Date.now()) / 60000)) : null;
+    const entries = watchEntries();
+    const names = entries.map((e) => e.label).join(" + ");
+    const now = Date.now();
+    const schedule = entries
+      .map((e) => ({ label: e.label, t: Number(WATCH.next[e.id]) || 0 }))
+      .filter((x) => x.t && x.label !== WATCH.lastSearch)
+      .sort((a, b) => a.t - b.t)
+      .slice(0, 3)
+      .map((x) => `${x.label} in ${Math.max(1, Math.ceil((x.t - now) / 60000))}m`);
     watchStatusEl.textContent = (WATCH.on ? "watch: ON" : "watch: off") +
-      ` \u00b7 ${names || "typed players"}` +
+      ` \u00b7 ${names || "nothing"}` +
       (WATCH.extra.length ? ` + ${WATCH.extra.length} typed` : "") +
       ` \u00b7 \u00d7${WATCH.factor} \u00b7 ${WATCH.results.length} on the list` +
-      (WATCH.on ? ` \u00b7 cycle ${WATCH.cycle}` + (next ? ` \u00b7 next in ${next} min` : "") : "");
+      (WATCH.on ? ` \u00b7 cycle ${WATCH.cycle}` : "") +
+      (WATCH.on
+        ? (WATCH.phase === "running"
+          ? ` \u00b7 running ${WATCH.lastSearch}`
+          : schedule.length ? ` \u00b7 next ${schedule.join(" \u00b7 ")}` : "")
+        : "");
     if (watchArmEl) {
       watchArmEl.textContent = WATCH.on ? "Disarm watch" : "Arm watch";
       watchArmEl.style.background = WATCH.on ? "#3b2233" : "#26364f";
@@ -2551,7 +2717,11 @@
     head.textContent = n
       ? `${n} listing(s) \u2014 cheapest rax/rating first`
       : "nothing on the list yet";
-    watchCountEl.append(head, btn("Clear list", () => {
+    watchCountEl.append(head, btn(
+      listWin && !listWin.closed ? "Close window" : "Pop out list",
+      () => watchPopOut(),
+      "font-size:11px;padding:2px 8px;"
+    ), btn("Clear list", () => {
       WATCH.results = [];
       watchDirty++;
       saveWatch();
@@ -2559,6 +2729,7 @@
     }, "font-size:11px;padding:2px 8px;"));
     watchListEl.textContent = "";
     for (const r of WATCH.results) watchListEl.appendChild(watchRow(r));
+    renderListWindow();
   }
 
   function render() {

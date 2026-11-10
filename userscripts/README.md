@@ -194,9 +194,14 @@ The third tab is a market watcher, and it is deliberately **not** a bidder.
   **extra players** — they ride on every sport/season the chosen searches already
   cover, or on the sport picked beside them when there is no search (`auto`
   can't inherit from nothing, so that combination refuses to arm).
-- **Arm watch** runs one search immediately, then **one search every random
-  8–11 minutes**. With several selected the pick is random each cycle, so they
-  share the one steady cadence instead of firing together.
+- **Every search has its own clock**: 7–15 minutes, re-rolled each time it runs.
+  Arm it and the first search goes immediately; the rest are already 7–15 minutes
+  out, so they stagger in behind it — NBA, then FC a minute or two later, then
+  MLB. Two scans are **never in flight at once**: every run goes through one
+  timer (`watchTick`), which always takes whichever search is due soonest, and a
+  search that comes due mid-scan simply waits in `WATCH.next`. A short breather
+  (40–130 s) separates the end of one run from the start of the next, so a queue
+  of due searches still reads as one-at-a-time rather than a burst.
 - The **console** is a timestamped line per event: which search is running, how
   many live listings it found at the ceiling, what failed, and when the next
   sweep is due.
@@ -208,10 +213,16 @@ The third tab is a market watcher, and it is deliberately **not** a bidder.
 - Its ceiling is its own (`Watch ceiling`, default 21) and it is applied through
   `scanCeiling` for that one scan, so it can't leak into a bid run. It never
   needs a Turnstile token — reads don't carry one.
+- **Pop out list** mirrors the list into its own small window (dark, same rows,
+  same order, each a plain link) for a second monitor; the button becomes **Close
+  window** while it is open. Read-only on purpose — arming, adding and clearing
+  stay in the panel, so nothing in that window can spend by itself.
 - The list prunes ended auctions on every cycle, dedupes by listing id, and caps
-  at 80 rows. State (armed flag, selections, ceiling, list, console, next sweep)
-  lives in `localStorage["walkr.autobid.watch.v1"]` and resumes after a reload
-  without re-firing instantly.
+  at 80 rows. State (armed flag, selections, ceiling, list, console, every
+  search's clock, and the last breather) lives in
+  `localStorage["walkr.autobid.watch.v1"]`. After a reload each search keeps the
+  clock it had; anything that came due while the page was down is pushed 20–70 s
+  out, so a refresh can never turn the cadence into a hammer.
 
 ### Per-preset rax/rating ceilings
 
@@ -300,9 +311,9 @@ only signal that survives:
 every leaf mentioning buy/bid/offer/rax — that is what to send if the primer logs
 `no bid control found`.
 
-Four jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
+Five jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
 loop, `primer.cjs` for the primer, `reconcile.cjs` for the allowance, `watch.cjs`
-for the Consistent tab): dry-run
+for the Consistent tab, `stagger.cjs` for its schedule): dry-run
 plans and spends nothing, a small allowance refuses to bid, LIVE bids at the
 buy-now price and debits the balance card by card, a fully-committed allowance
 stops spending but keeps watching while a bid is still inside its window, the
@@ -314,8 +325,11 @@ suite adds: the dropdown is the iOS list (and the old families are gone), three
 tabs exist, a bid-run pick can't edit what is being watched, arming runs one
 search at the watch ceiling and **bids nothing**, the list is buttons carrying
 both buy-now and auction-only listings while dropping the over-ceiling one, a row
-click opens `realapp.com/<route>` in a new tab, and Disarm stops the timer while
-the list survives.
+click opens `realapp.com/<route>` in a new tab, the pop-out window carries the
+same rows as links, and Disarm stops the timer while the list survives. The
+stagger suite seeds two searches 25 s and 5 min out, reloads, and proves only the
+due one ran, the other search's clock was untouched, the runner put itself back
+7 minutes out, and nothing overlapped.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
 preset's id and the next-cycle timestamp — the primer reloads the page, and
