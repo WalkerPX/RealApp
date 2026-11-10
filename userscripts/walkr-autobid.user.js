@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.6.0
-// @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling. Dry-run by default. Hard caps. Kill switch.
+// @version      0.7.0
+// @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling, and watches the same searches on a timer to hand back a buy list. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
 // @downloadURL  https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -35,11 +35,35 @@
       and the panel shows "from Walkr's Menu".
    2. Standalone: pick a Quick Search (same lineups) or set Sport + Players here.
 
+  THE QUICK SEARCHES ARE THE IOS APP'S
+  ------------------------------------
+  The dropdown is not a generated family any more — it is exactly the saved
+  Quick Searches from the iOS app (the Made tweak mirrors them to the IPA host,
+  because a sideload update wipes the app container). Each is a nickname plus a
+  player list sliced by sport/season, which is all the app saves. Regenerate
+  with `node scripts/autobid/export_quick.mjs` after editing them in the app.
+
+  The app's deal screen screens at a factor of 21 rax/rating by default, so a
+  baked search carries that ceiling; the "bid ceiling" field in the panel
+  overrides it for a run, and the script's own 11 is what a run with no search
+  at all falls back to.
+
   THE FLOW
   --------
   Run  → scans and prints the plan. Spends nothing unless LIVE is ticked.
   Then, if you like the list, "Bid these" fires exactly that plan — no re-scan.
   A plan older than 5 minutes warns before it bids, because listings turn over.
+
+  THE CONSISTENT TAB (NO BIDDING)
+  -------------------------------
+  The third tab watches instead of buying. Choose one or more Quick Searches
+  (plus any extra players by hand), arm it, and every 8–11 minutes — a fresh
+  random wait each cycle — it runs ONE of them, picked at random, and keeps
+  every listing that clears the watch ceiling in a list. Each row is a button
+  that opens that listing's buy screen in a new tab, so the purchase is still a
+  click you make. Its console shows what is running, what it found, and when
+  the next sweep is due. Nothing here bids, ever: the watch list only spends
+  when you open a row and buy.
 
   THE LOOP (UNATTENDED)
   ---------------------
@@ -95,7 +119,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.6.0";
+    GM_info.script && GM_info.script.version) || "0.7.0";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -122,21 +146,21 @@
   const ALL_SPORTS = ["nhl", "nba", "mlb", "wnba", "nfl", "ncaaf", "ncaam", "soccer"];
 
   // >>> GENERATED PRESETS
+  // Baked from the iOS app's saved Quick Searches (Made tweak → IPA host
+  // /ipa/menu/quick). Regenerate: node scripts/autobid/export_quick.mjs
+  // 11 searches · 71 cards · screens at ×21
   const PRESETS = [
-    {"id":"lowperrax","label":"Low PerRax","sport":"all","cards":9,"slices":[{"sport":"nhl","season":2025,"players":["Jake Guentzel"]},{"sport":"nhl","season":2024,"players":["Brandon Hagel"]},{"sport":"nhl","season":2023,"players":["Jake Guentzel"]},{"sport":"ncaam","season":2026,"players":["Trey Kaufman-Renn","Lamar Wilkerson","Dailyn Swain"]},{"sport":"ncaam","season":2025,"players":["Trey Kaufman-Renn"]},{"sport":"nba","season":2024,"players":["Myles Turner"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]}]},
-    {"id":"budget-nba","label":"Optimal Budget · NBA","sport":"nba","cards":5,"slices":[{"sport":"nba","season":2026,"players":["De'Aaron Fox","James Harden"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]},{"sport":"nba","season":2024,"players":["Pascal Siakam","Kyrie Irving"]}]},
-    {"id":"budget-nhl","label":"Optimal Budget · NHL","sport":"nhl","cards":7,"slices":[{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner","Filip Forsberg"]}],"playerCaps":{"Jack Eichel":15,"Filip Forsberg":15}},
-    {"id":"budget-ncaam","label":"Optimal Budget · CBB","sport":"ncaam","cards":5,"slices":[{"sport":"ncaam","season":2026,"players":["Juke Harris","Chris Bell","Rob Martin"]},{"sport":"ncaam","season":2024,"players":["Al-Amir Dawes","Ben Krikke"]}]},
-    {"id":"budget-mlb","label":"Optimal Budget · MLB","sport":"mlb","cards":5,"slices":[{"sport":"mlb","season":2026,"players":["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport":"mlb","season":2025,"players":["Vladimir Guerrero Jr."]},{"sport":"mlb","season":2024,"players":["Pete Alonso"]}]},
-    {"id":"budget-wnba","label":"Optimal Budget · WNBA","sport":"wnba","cards":5,"slices":[{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]}]},
-    {"id":"budget-all","label":"Optimal Budget · All Sports","sport":"all","cards":27,"slices":[{"sport":"nba","season":2026,"players":["De'Aaron Fox","James Harden"]},{"sport":"nba","season":2025,"players":["Pascal Siakam"]},{"sport":"nba","season":2024,"players":["Pascal Siakam","Kyrie Irving"]},{"sport":"nhl","season":2025,"players":["Matt Boldy","Mitch Marner","Jack Eichel"]},{"sport":"nhl","season":2024,"players":["Sam Bennett","Kyle Connor"]},{"sport":"nhl","season":2023,"players":["Stuart Skinner","Filip Forsberg"]},{"sport":"ncaam","season":2026,"players":["Juke Harris","Chris Bell","Rob Martin"]},{"sport":"ncaam","season":2024,"players":["Al-Amir Dawes","Ben Krikke"]},{"sport":"mlb","season":2026,"players":["Fernando Tatis Jr.","Kyle Schwarber","CJ Abrams"]},{"sport":"mlb","season":2025,"players":["Vladimir Guerrero Jr."]},{"sport":"mlb","season":2024,"players":["Pete Alonso"]},{"sport":"wnba","season":2026,"players":["Kelsey Mitchell","Paige Bueckers"]},{"sport":"wnba","season":2025,"players":["Chelsea Gray","Satou Sabally"]},{"sport":"wnba","season":2024,"players":["Kayla McBride"]}],"playerCaps":{"Jack Eichel":15,"Filip Forsberg":15}},
-    {"id":"max-cbb","label":"Optimal MAX · CBB","sport":"ncaam","cards":7,"maxRpr":21,"slices":[{"sport":"ncaam","season":2026,"players":["Cameron Boozer","Yaxel Lendeborg"]},{"sport":"ncaam","season":2025,"players":["Johni Broome","Cooper Flagg","Mark Sears","Braden Smith"]},{"sport":"ncaam","season":2024,"players":["Zach Edey"]}]},
-    {"id":"setup-cbb","label":"Optimal Setup · CBB","sport":"ncaam","cards":8,"maxRpr":21,"slices":[{"sport":"ncaam","season":2026,"players":["Cameron Boozer"]},{"sport":"ncaam","season":2025,"players":["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Eric Dixon","Braden Smith"]},{"sport":"ncaam","season":2024,"players":["Zach Edey","Mark Sears"]}]},
-    {"id":"setup-nhl","label":"Optimal Setup · NHL","sport":"nhl","cards":9,"maxRpr":21,"slices":[{"sport":"nhl","season":2025,"players":["Nathan MacKinnon"]},{"sport":"nhl","season":2024,"players":["Leon Draisaitl","Connor Hellebuyck","Sergei Bobrovsky"]},{"sport":"nhl","season":2023,"players":["Connor McDavid","Leon Draisaitl","Igor Shesterkin","Sergei Bobrovsky","Jake Oettinger"]}]},
-    {"id":"setup-nba","label":"Optimal Setup · NBA","sport":"nba","cards":5,"maxRpr":21,"slices":[{"sport":"nba","season":2026,"players":["Jalen Brunson"]},{"sport":"nba","season":2025,"players":["Shai Gilgeous-Alexander","Nikola Jokic"]},{"sport":"nba","season":2024,"players":["Luka Doncic","Nikola Jokic"]}]},
-    {"id":"setup-wnba","label":"Optimal Setup · WNBA","sport":"wnba","cards":6,"maxRpr":21,"slices":[{"sport":"wnba","season":2026,"players":["A'ja Wilson"]},{"sport":"wnba","season":2025,"players":["A'ja Wilson","Aliyah Boston"]},{"sport":"wnba","season":2024,"players":["Napheesa Collier","A'ja Wilson","Breanna Stewart"]}]},
-    {"id":"setup-mlb","label":"Optimal Setup · MLB","sport":"mlb","cards":14,"maxRpr":21,"slices":[{"sport":"mlb","season":2026,"players":["Shohei Ohtani","Cam Schlittler","Cristopher Sanchez","Jacob Misiorowski"]},{"sport":"mlb","season":2025,"players":["Shohei Ohtani","Yoshinobu Yamamoto","Eric Lauer","Kevin Gausman","Tarik Skubal"]},{"sport":"mlb","season":2024,"players":["Shohei Ohtani","Tarik Skubal","Zack Wheeler","Seth Lugo","Logan Gilbert"]}]},
-    {"id":"dailypack-all","label":"Daily Pack Buys · All 17","sport":"all","cards":17,"maxRpr":21,"slices":[{"sport":"nhl","season":2023,"players":["Connor McDavid","Leon Draisaitl","Vincent Trocheck"]},{"sport":"nhl","season":2024,"players":["Connor McDavid","Leon Draisaitl","Nathan MacKinnon"]},{"sport":"nhl","season":2025,"players":["Nathan MacKinnon"]},{"sport":"ncaam","season":2025,"players":["Yaxel Lendeborg","Johni Broome","Cooper Flagg","Braden Smith","Mark Sears"]},{"sport":"ncaam","season":2026,"players":["Cameron Boozer","Bennett Stirtz","Keaton Wagler"]},{"sport":"ncaam","season":2024,"players":["Zach Edey"]},{"sport":"wnba","season":2025,"players":["A'ja Wilson"]}]},
+    {"id":"ios-qmwar9itb","label":"Farm?-FC","sport":"soccer","cards":6,"maxRpr":21,"slices":[{"sport":"soccer","season":2025,"players":["Kylian Mbappe","Erling Haaland","Harry Kane","Lamine Yamal","Lionel Messi","Michael Olise"]}]},
+    {"id":"ios-qmwar3ukg","label":"Current-FC","sport":"soccer","cards":9,"maxRpr":21,"slices":[{"sport":"soccer","season":2026,"players":["Bruno Fernandes","Erling Haaland","Lamine Yamal","Nico Paz","Michael Olise","Kylian Mbappe","Declan Rice","Jude Bellingham","Harry Kane"]}]},
+    {"id":"ios-qmwaqp0nx","label":"Current-NFL","sport":"nfl","cards":8,"maxRpr":21,"slices":[{"sport":"nfl","season":2026,"players":["Bijan Robinson","Kenneth Walker","Brock Purdy","Caleb Williams","Christian McCaffrey","Josh Allen","James Cook III","Joe Burrow"]}]},
+    {"id":"ios-qmw9w8sjk","label":"Current-NBA","sport":"nba","cards":14,"maxRpr":21,"slices":[{"sport":"nba","season":2027,"players":["Ty Jerome","Victor Wembanyama","Shai Gilgeous-Alexander","Jared McCain","Luka Dončić","Kelly Oubre Jr.","VJ Edgecombe","Tyrese Haliburton","Pascal Siakam","LeBron James","Jay Huff","Ivica Zubac","Tyrese Maxey","Austin Reaves"]}]},
+    {"id":"ios-qmw9w4gya","label":"Current-NHL","sport":"nhl","cards":7,"maxRpr":21,"slices":[{"sport":"nhl","season":2026,"players":["Macklin Celebrini","Nathan MacKinnon","Leon Draisaitl","Kirill Kaprizov","Connor McDavid","Auston Matthews","Quinn Hughes"]}]},
+    {"id":"ios-qmw9vxhse","label":"Farm-NHL","sport":"nhl","cards":5,"maxRpr":21,"slices":[{"sport":"nhl","season":2023,"players":["Connor McDavid","Sergei Bobrovsky","Igor Shesterkin","Leon Draisaitl"]},{"sport":"nhl","season":2024,"players":["Leon Draisaitl"]}]},
+    {"id":"ios-qmw9vnfmq","label":"Farm-WNBA","sport":"wnba","cards":1,"maxRpr":21,"slices":[{"sport":"wnba","season":2025,"players":["A'ja Wilson"]}]},
+    {"id":"ios-qmw9vmxkz","label":"Farm-NFL","sport":"nfl","cards":5,"maxRpr":21,"slices":[{"sport":"nfl","season":2025,"players":["Christian McCaffrey","Puka Nacua"]},{"sport":"nfl","season":2024,"players":["Saquon Barkley","Derrick Henry"]},{"sport":"nfl","season":2023,"players":["Christian McCaffrey"]}]},
+    {"id":"ios-qmw9vk4us","label":"Farm-CFB","sport":"ncaaf","cards":5,"maxRpr":21,"slices":[{"sport":"ncaaf","season":2024,"players":["Ashton Jeanty","Cam Skattebo","Travis Hunter"]},{"sport":"ncaaf","season":2023,"players":["Ollie Gordon II"]},{"sport":"ncaaf","season":2025,"players":["Caleb Hawkins"]}]},
+    {"id":"ios-qmw9vhjne","label":"Farm-Mens BB","sport":"all","cards":6,"maxRpr":21,"slices":[{"sport":"ncaam","season":2024,"players":["Zach Edey"]},{"sport":"ncaam","season":2025,"players":["Yaxel Lendeborg"]},{"sport":"ncaam","season":2026,"players":["Cameron Boozer"]},{"sport":"nba","season":2024,"players":["Luka Dončić","Nikola Jokić"]},{"sport":"nba","season":2025,"players":["Shai Gilgeous-Alexander"]}]},
+    {"id":"ios-qmw9vegtb","label":"Farm-MLB","sport":"mlb","cards":5,"maxRpr":21,"slices":[{"sport":"mlb","season":2025,"players":["Shohei Ohtani","Yoshinobu Yamamoto"]},{"sport":"mlb","season":2023,"players":["Shohei Ohtani"]},{"sport":"mlb","season":2026,"players":["Drew Rasmussen","Jacob Misiorowski"]}]},
   ];
   // <<< GENERATED PRESETS
 
@@ -417,24 +441,31 @@
     return Object.keys(merged).length ? merged : NO_CAPS;
   }
 
+  /** A ceiling that belongs to one scan rather than to the panel — the
+   * Consistent tab screens at its own factor, and it must not leak into a bid
+   * run (or be overwritten mid-scan by render()'s once-a-second pass). */
+  let scanCeiling = null;
+
   /** The rax-per-rating ceiling for one player: their own when the lineup names
    * one (the deep-market cards worth a looser price because they level fast),
    * otherwise the run's ceiling. */
   function capFor(name) {
+    if (scanCeiling != null) return scanCeiling;
     const c = activePlayerCaps()[name];
     return c == null ? DEFAULTS.maxRpr : Number(c);
   }
 
   /** One listing → a plan candidate, or nothing. `pid` rides along so a bid
    * that loses its auction can be looked up again at reconciliation time. */
-  function consider(l, sport, season, label, found, pid) {
+  function consider(l, sport, season, label, found, pid, opts) {
+    const watch = !!(opts && opts.watch);
     const ends = l.endsAt ? Date.parse(l.endsAt) : NaN;
     const price = listingPrice(l);
     const rating = listingRating(l);
     const rpr = price != null && price > 0 && rating ? price / rating : null;
     if (Number.isFinite(ends) && ends <= Date.now()) return;   // auction already ended
     if (!l.canBid) return;                                     // Real won't take a bid on it
-    if (l.buyNowPrice == null) return;                         // no trigger price to bid
+    if (l.buyNowPrice == null && !watch) return;               // no trigger price to bid
     if (price == null || price <= 0) return;
     if (rating == null) return;                                // nothing to price against
     const cap = capFor(label);
@@ -444,12 +475,16 @@
       listingId: l.id, sport, season, player: label, rarity: l.rarity,
       rating, price, rpr: Math.round(rpr * 100) / 100, cap,
       pid: pid == null ? null : pid, endsAt: l.endsAt || null, url: listingUrl(l.id),
+      /** How the price was quoted: a buy-now trigger, or a live auction's
+       * current/minimum bid. Only the watch list ever sees the second kind —
+       * a bid run needs a trigger price. */
+      how: l.buyNowPrice != null ? "buy now" : "auction",
     });
   }
 
   /** Find every live listing of every target that clears the ceiling. A target
    * with players is scoped to them; one without is a whole-market sweep. */
-  async function scan(targets, log) {
+  async function scan(targets, log, opts) {
     const found = [];
     for (const t of targets) {
       if (S.stop) return found;
@@ -465,7 +500,7 @@
           try { ls = await bucketListings(sport, season, rarity, "card"); }
           catch (e) { log(`! bucket ${sport} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
-          for (const l of ls) consider(l, sport, season, listingLabel(l), found, null);
+          for (const l of ls) consider(l, sport, season, listingLabel(l), found, null, opts);
           await sleep(gap());
         }
         continue;
@@ -484,7 +519,7 @@
           try { ls = await playerListings(sport, season, pid, rarity, "card"); }
           catch (e) { log(`! listings ${name} r${rarity}: ${e.message}`); if (authFail(e, log)) return found; }
           if (ls.length) log(`  ${RARITY_LABEL[rarity]}: ${ls.length} listing(s)`);
-          for (const l of ls) consider(l, sport, season, name, found, pid);
+          for (const l of ls) consider(l, sport, season, name, found, pid, opts);
           await sleep(gap());
         }
       }
@@ -1462,6 +1497,15 @@
    * allowance (Optimal Setup · NHL + · NBA + · CBB, say). Nothing reads
    * `quickEl.value` — this list is the single source of truth. */
   let selectedIds = [];
+  /** The panel's own ceiling override, persisted, so "screen at 14 today"
+   * survives a reload. Null means "whatever the lineups say" (see
+   * effectiveMaxRpr) — which is why picking a lineup still changes the number. */
+  const FACTOR_KEY = "walkr.autobid.factor.v1";
+  let factorOverride = null;
+  try {
+    const f = Number(localStorage.getItem(FACTOR_KEY));
+    if (Number.isFinite(f) && f > 0) factorOverride = f;
+  } catch (_) {}
   function selectedPresets() {
     return PRESETS.filter((p) => selectedIds.includes(p.id));
   }
@@ -1494,6 +1538,7 @@
    * can't leave a loosened ceiling behind. */
   function effectiveMaxRpr() {
     if (hashPlan && hashPlan.maxRpr != null) return Number(hashPlan.maxRpr);
+    if (factorOverride != null) return Number(factorOverride);
     // A loosened ceiling is only inherited when *every* selected lineup declares
     // one. Mixing a capped preset with an uncapped one falls back to the shipped
     // cap, so selecting a second preset can never leave 21 behind on a lineup
@@ -1684,12 +1729,240 @@
     }
   }
 
+  // ── the Consistent tab: watch the market, hand back a buy list ────────────
+  /** Nothing in this block bids. Each cycle runs ONE of the chosen quick
+   * searches — picked at random, so several searches share one steady, human
+   * cadence instead of firing together — and keeps every listing that clears
+   * the watch ceiling. The list is a column of buttons: opening one is the only
+   * way any of this spends rax, and that click is yours. */
+  const WATCH_CAPS = {
+    minIntervalMin: 8,
+    maxIntervalMin: 11,
+    maxResults: 80,
+    maxLog: 400,
+  };
+  const WATCH_KEY = "walkr.autobid.watch.v1";
+  const WATCH = {
+    on: false,
+    presetIds: [],
+    /** Names typed into the panel, searched in every sport/season the chosen
+     * searches already carry (or in the sport picked beside them). */
+    extra: [],
+    sport: "auto",
+    factor: 21,
+    results: [],
+    logLines: [],
+    cycle: 0,
+    nextAt: 0,
+    lastSearch: "",
+    timer: null,
+  };
+  /** 0 while the DOM matches WATCH.results / the console; bumped by anything
+   * that changes them, so the once-a-second render() doesn't rebuild 80 buttons
+   * every tick. */
+  let watchDirty = 0;
+  let watchRendered = -1;
+  let watchLogRendered = -1;
+
+  function saveWatch() {
+    try {
+      localStorage.setItem(WATCH_KEY, JSON.stringify({
+        on: WATCH.on, presetIds: WATCH.presetIds, extra: WATCH.extra,
+        sport: WATCH.sport, factor: WATCH.factor, results: WATCH.results,
+        logLines: WATCH.logLines.slice(-120), cycle: WATCH.cycle, nextAt: WATCH.nextAt,
+      }));
+    } catch (_) {}
+  }
+  function loadWatch() {
+    try {
+      const s = JSON.parse(localStorage.getItem(WATCH_KEY) || "null");
+      return s && typeof s === "object" ? s : null;
+    } catch (_) { return null; }
+  }
+
+  const hhmmss = () => new Date().toLocaleTimeString("en-GB", { hour12: false });
+  function wlog(line) {
+    WATCH.logLines.push(`${hhmmss()} ${line}`);
+    if (WATCH.logLines.length > WATCH_CAPS.maxLog)
+      WATCH.logLines = WATCH.logLines.slice(-WATCH_CAPS.maxLog);
+    watchLogRendered = -1;
+    saveWatch();
+  }
+
+  const watchPresets = () => PRESETS.filter((p) => WATCH.presetIds.includes(p.id));
+
+  /** The slices one cycle walks: the search's own players, plus the hand-typed
+   * ones. Typed names ride on every sport/season the search already covers
+   * (Farm-Mens BB is CBB + NBA at once) unless a sport is picked for them. */
+  function watchTargets(preset) {
+    const targets = (preset ? preset.slices : []).map((s) => ({
+      sport: s.sport, season: s.season, players: (s.players || []).slice(),
+    }));
+    if (!WATCH.extra.length) return targets;
+    const extra = WATCH.extra.slice();
+    if (WATCH.sport !== "auto") {
+      const sp = SPORT_ALIAS[WATCH.sport] || WATCH.sport;
+      return targets.concat([{ sport: sp, season: SEASON[sp], players: extra }]);
+    }
+    const pairs = [];
+    for (const t of targets)
+      if (!pairs.some((p) => p.sport === t.sport && p.season === t.season))
+        pairs.push({ sport: t.sport, season: t.season });
+    if (!pairs.length) return targets;   // nothing to inherit from — armed guard warns instead
+    return targets.concat(pairs.map((p) => ({ sport: p.sport, season: p.season, players: extra })));
+  }
+
+  /** A fresh random wait in [8, 11] minutes every cycle — the same reasoning as
+   * the bid loop's cadence: a metronome is the easiest thing about a bot to spot. */
+  function watchWaitMs() {
+    const lo = WATCH_CAPS.minIntervalMin, hi = WATCH_CAPS.maxIntervalMin;
+    return (lo + Math.floor(Math.random() * (hi - lo + 1))) * 60000;
+  }
+
+  function watchSchedule(delayMs) {
+    if (WATCH.timer) { clearTimeout(WATCH.timer); WATCH.timer = null; }
+    if (!WATCH.on) { WATCH.nextAt = 0; saveWatch(); render(); return; }
+    WATCH.nextAt = Date.now() + delayMs;
+    saveWatch();
+    WATCH.timer = setTimeout(() => { WATCH.timer = null; watchCycle(); }, delayMs);
+    render();
+  }
+
+  function watchStop(reason) {
+    if (WATCH.timer) { clearTimeout(WATCH.timer); WATCH.timer = null; }
+    const was = WATCH.on;
+    WATCH.on = false;
+    WATCH.nextAt = 0;
+    if (was) wlog(`watch stopped — ${reason}`);
+    saveWatch();
+    render();
+  }
+
+  function timeLeft(endsAt) {
+    if (!endsAt) return "";
+    const ms = Date.parse(endsAt) - Date.now();
+    if (!Number.isFinite(ms)) return "";
+    if (ms <= 0) return "ended";
+    const m = Math.floor(ms / 60000);
+    if (m < 60) return `${m}m left`;
+    return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m left`;
+  }
+
+  /** Fold this cycle's findings into the list: drop anything whose auction has
+   * ended, add what is new, keep it cheapest-rax-per-rating first, cap the row
+   * count so a night of cycles can't grow an unusable list. */
+  function watchMerge(found) {
+    const now = Date.now();
+    const keep = WATCH.results.filter((r) => !(r.endsAt && Date.parse(r.endsAt) <= now));
+    let added = 0;
+    for (const f of found) {
+      if (keep.some((r) => r.listingId === f.listingId)) continue;
+      keep.push({ ...f, seenAt: now });
+      added++;
+    }
+    keep.sort((a, b) => a.rpr - b.rpr);
+    WATCH.results = keep.slice(0, WATCH_CAPS.maxResults);
+    watchDirty++;
+    return added;
+  }
+
+  async function watchCycle() {
+    WATCH.timer = null;
+    if (!WATCH.on) return;
+    if (S.stop) { watchStop("STOP pressed."); return; }
+    const picks = watchPresets();
+    if (!picks.length && !WATCH.extra.length) { watchStop("nothing selected to search."); return; }
+    const preset = picks.length ? picks[Math.floor(Math.random() * picks.length)] : null;
+    WATCH.cycle++;
+    WATCH.lastSearch = preset ? preset.label : "typed players";
+    const targets = watchTargets(preset);
+    if (!targets.length) { watchStop("nothing to search — pick a search or a sport."); return; }
+    const ceiling = Math.max(1, Math.round(Number(WATCH.factor) || 21));
+    const players = targets.reduce((n, t) => n + (t.players || []).length, 0);
+    wlog(`search running — ${WATCH.lastSearch} · ${players} player(s) · ×${ceiling} · cycle ${WATCH.cycle}`);
+    render();
+    const t0 = Date.now();
+    let found = [];
+    scanCeiling = ceiling;
+    try {
+      // The per-player chatter rides in the log for a bid run; here the console
+      // only wants the search line, what it found, and anything that failed.
+      found = await scan(targets, (s) => { if (/^!/.test(s)) wlog(s); }, { watch: true });
+    } catch (e) {
+      wlog(`! search failed: ${e.message || e}`);
+    } finally {
+      scanCeiling = null;
+    }
+    if (!WATCH.on) return;
+    const added = watchMerge(found);
+    const secs = Math.round((Date.now() - t0) / 1000);
+    wlog(`${WATCH.lastSearch}: ${found.length} live listing(s) at or under ${ceiling} rax/rating · ` +
+      `${added} new · ${WATCH.results.length} on the list · ${secs}s`);
+    saveWatch();
+    watchSchedule(watchWaitMs());
+  }
+
+  function watchArm() {
+    if (WATCH.on) { watchStop("disarmed."); return; }
+    const picks = watchPresets();
+    if (!picks.length && !WATCH.extra.length) {
+      wlog("pick a quick search (or type some players) before arming.");
+      render();
+      return;
+    }
+    // "auto" only has sports to inherit when a saved search is carrying them.
+    if (!picks.length && WATCH.sport === "auto") {
+      wlog("typed players need a sport — pick one in \"their sport\" (auto follows the saved searches).");
+      render();
+      return;
+    }
+    WATCH.on = true;
+    WATCH.cycle = 0;
+    WATCH.results = [];
+    WATCH.logLines = [];
+    watchDirty++;
+    watchLogRendered = -1;
+    S.stop = false;                       // a STOP from a bid run mustn't kill this
+    const names = picks.map((p) => p.label).join(" + ") || "typed players";
+    wlog(`watch armed — ${names}` +
+      (WATCH.extra.length ? ` + ${WATCH.extra.length} hand-typed name(s)` : "") +
+      ` · a random ${WATCH_CAPS.minIntervalMin}\u2013${WATCH_CAPS.maxIntervalMin} min wait between searches · ` +
+      `ceiling ×${Math.max(1, Math.round(Number(WATCH.factor) || 21))}`);
+    saveWatch();
+    watchCycle();
+  }
+
+  function watchResume() {
+    const s = loadWatch();
+    if (!s) return;
+    WATCH.presetIds = Array.isArray(s.presetIds) ? s.presetIds.filter((id) => PRESETS.some((p) => p.id === id)) : [];
+    WATCH.extra = Array.isArray(s.extra) ? s.extra : [];
+    WATCH.sport = s.sport || "auto";
+    WATCH.factor = Number(s.factor) || 21;
+    WATCH.results = Array.isArray(s.results) ? s.results : [];
+    WATCH.logLines = Array.isArray(s.logLines) ? s.logLines : [];
+    WATCH.cycle = Number(s.cycle) || 0;
+    watchDirty++;
+    if (!s.on) return;
+    WATCH.on = true;
+    // The page was reloaded mid-wait: honour what is left of it, but never
+    // re-fire instantly (a reload loop would turn the cadence into a hammer).
+    const wait = watchWaitMs();
+    const left = Number(s.nextAt) ? Number(s.nextAt) - Date.now() : wait;
+    watchSchedule(Math.min(wait, Math.max(30000, left)));
+  }
+
   // ── UI ───────────────────────────────────────────────────────────────────
   let panel, logEl, statusEl, sportEl, playersEl, quickEl, liveEl, capsEl, chipsEl, presetChipsEl, lastBtnEl;
   let intervalEl, intervalMaxEl, allowanceEl, primerEl, loopEl, loopBtnEl;
+  let ceilEl;
+  let watchEl, watchChipsEl, watchPlayersEl, watchSportEl, watchFactorEl, watchArmEl,
+    watchStatusEl, watchConsoleEl, watchListEl, watchCountEl;
   /** boot() runs two or three times (readyState, DOMContentLoaded, load) — the
    * loop must only be resumed once, or every pass would arm another timer. */
   let loopResumed = false;
+  /** Same for the watch: one resume, one timer. */
+  let watchResumed = false;
   const btn = (label, fn, css) => {
     const b = document.createElement("button");
     b.textContent = label;
@@ -1725,15 +1998,18 @@
     // after pressing it doesn't quietly re-arm the thing.
     head.appendChild(btn("STOP", () => {
       S.stop = true;
+      const watching = WATCH.on;
+      if (watching) watchStop("STOP pressed.");
       if (LOOP.on || LOOP.phase !== "idle") loopStop("STOP pressed.");
-      else logLine("STOP pressed.");
+      else if (!watching) logLine("STOP pressed.");
     }, "background:#c0392b;color:#fff;font-weight:700;"));
     makeDraggable(panel, head);
 
-    /** Two panes behind a tab strip. The search is the thing that changes
-     * between runs and the loop is a set-once thing; side by side they made the
-     * panel noisy, so they live on their own tabs. The strip sits inside the
-     * same scrolling block as the panes, so the log still gets the slack. */
+    /** Three panes behind a tab strip. The search is the thing that changes
+     * between runs, the loop is a set-once thing, and Consistent is a different
+     * job entirely (watch, don't bid) — side by side they made the panel noisy.
+     * The strip sits inside the same scrolling block as the panes, so the log
+     * still gets the slack. */
     const cfg = document.createElement("div");
     cfg.style.cssText = "border-bottom:1px solid #2a3a55;flex:0 1 auto;min-height:0;overflow:auto";
     const paneCss = "padding:8px 10px;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center";
@@ -1741,16 +2017,33 @@
     paneSetup.style.cssText = paneCss;
     const paneLoop = document.createElement("div");
     paneLoop.style.cssText = paneCss + ";display:none";
-    const tab = (label, mine, other) =>
-      btn(label, () => {
-        const show = mine.style.display === "none";
-        mine.style.display = show ? "grid" : "none";
-        other.style.display = show ? "none" : "grid";
-        render();
-      }, "padding:3px 10px;");
+    const paneWatch = document.createElement("div");
+    paneWatch.style.cssText = paneCss + ";display:none";
+    const panes = [
+      { id: "bid", label: "Search", el: paneSetup },
+      { id: "loop", label: "Loop", el: paneLoop },
+      { id: "watch", label: "Consistent", el: paneWatch },
+    ];
+    const paneBtns = {};
+    const showPane = (id) => {
+      for (const p of panes) {
+        p.el.style.display = p.id === id ? "grid" : "none";
+        const b = paneBtns[p.id];
+        if (!b) continue;
+        const on = p.id === id;
+        b.style.background = on ? "#26405f" : "#1a2b45";
+        b.style.borderColor = on ? "#3f6699" : "#2a3a55";
+        b.style.color = on ? "#ffffff" : "#cfe0f7";
+      }
+      render();
+    };
     const tabBar = document.createElement("div");
     tabBar.style.cssText = "display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid #2a3a55;background:#0e1728";
-    tabBar.append(tab("Search", paneSetup, paneLoop), tab("Loop", paneLoop, paneSetup));
+    for (const p of panes) {
+      paneBtns[p.id] = btn(p.label, () => showPane(p.id), "padding:3px 10px;");
+      tabBar.appendChild(paneBtns[p.id]);
+    }
+    showPane("bid");
 
     quickEl = document.createElement("select");
     // A single dropdown that ADDS: pick a lineup and it becomes a bubble below,
@@ -1781,12 +2074,125 @@
     presetChipsEl.style.cssText =
       "grid-column:1/-1;display:none;flex-wrap:wrap;gap:4px;align-items:center;margin:1px 0 2px";
 
+    /** The iOS app's deal screen screens at "price under factor × the card's
+     * own rating", and the factor is editable there. Same field: it overrides
+     * whatever ceiling the chosen searches carry, and sticks across reloads. */
+    ceilEl = document.createElement("input");
+    ceilEl.type = "number";
+    ceilEl.min = "1";
+    ceilEl.max = "100";
+    ceilEl.step = "1";
+    ceilEl.value = String(effectiveMaxRpr());
+    ceilEl.title =
+      "rax/rating ceiling for a bid run — the iOS deal screen's factor. Blank/" +
+      "unchanged means whatever the chosen searches carry (they ship 21).";
+    ceilEl.style.cssText = "width:64px;" + selCss();
+    ceilEl.onchange = () => {
+      const v = Math.min(100, Math.max(1, Math.round(Number(ceilEl.value) || 0)));
+      if (!v) { ceilEl.value = String(effectiveMaxRpr()); return; }
+      factorOverride = v;
+      try { localStorage.setItem(FACTOR_KEY, String(v)); } catch (_) {}
+      ceilEl.value = String(v);
+      render();
+    };
+    /** ...and a way back: an override is persisted, so without this a single
+     * edit would pin the ceiling forever and the searches' own 21 could never
+     * take over again. */
+    const ceilWrap = document.createElement("div");
+    ceilWrap.style.cssText = "display:flex;gap:6px;align-items:center";
+    ceilWrap.append(ceilEl, btn("follow searches", () => {
+      factorOverride = null;
+      try { localStorage.removeItem(FACTOR_KEY); } catch (_) {}
+      render();
+    }, "font-size:11px;padding:2px 8px;"));
+
     capsEl = document.createElement("div");
     capsEl.style.cssText = "grid-column:1/-1;color:#9fb3d1";
     liveEl = document.createElement("label");
     liveEl.style.cssText = "grid-column:1/-1;display:flex;gap:6px;align-items:center;color:#ffb4a2";
     liveEl.innerHTML = '<input type="checkbox"> LIVE (actually bid — spends rax)';
     liveEl.querySelector("input").onchange = (e) => { DEFAULTS.live = e.target.checked; render(); };
+
+    /* ── Consistent: the watch list (nothing here bids) ─────────────────── */
+    watchEl = document.createElement("select");
+    watchEl.title = "add a saved search to the watch — each pick becomes a bubble";
+    watchEl.appendChild(opt("", "— add a search to watch —"));
+    for (const p of PRESETS) watchEl.appendChild(opt(p.id, p.label));
+    watchEl.style.cssText = selCss() + "width:100%;";
+    watchEl.onchange = () => {
+      const pick = watchEl.value;
+      watchEl.value = "";
+      if (!pick) return;
+      if (!WATCH.presetIds.includes(pick)) WATCH.presetIds.push(pick);
+      saveWatch();
+      render();
+    };
+
+    watchChipsEl = document.createElement("div");
+    watchChipsEl.style.cssText =
+      "grid-column:1/-1;display:none;flex-wrap:wrap;gap:4px;align-items:center;margin:1px 0 2px";
+
+    watchPlayersEl = document.createElement("input");
+    watchPlayersEl.placeholder = "extra players, comma separated (optional)";
+    watchPlayersEl.style.cssText =
+      "background:#0b1120;color:#e6edf7;border:1px solid #2a3a55;border-radius:5px;padding:3px 6px;width:100%";
+    watchPlayersEl.oninput = () => {
+      WATCH.extra = watchPlayersEl.value.split(",").map((s) => s.trim()).filter(Boolean);
+      saveWatch();
+      render();
+    };
+
+    watchSportEl = document.createElement("select");
+    watchSportEl.title =
+      "which sport the hand-typed names belong to — auto keeps every sport/season the chosen searches already cover";
+    watchSportEl.appendChild(opt("auto", "auto (from the searches)"));
+    for (const s of ALL_SPORTS) watchSportEl.appendChild(opt(s, s));
+    watchSportEl.style.cssText = selCss();
+    watchSportEl.onchange = () => {
+      WATCH.sport = watchSportEl.value;
+      saveWatch();
+      render();
+    };
+
+    watchFactorEl = document.createElement("input");
+    watchFactorEl.type = "number";
+    watchFactorEl.min = "1";
+    watchFactorEl.max = "100";
+    watchFactorEl.step = "1";
+    watchFactorEl.value = String(WATCH.factor);
+    watchFactorEl.title = "rax/rating ceiling for the watch — 21 is the iOS app's default factor";
+    watchFactorEl.style.cssText = "width:64px;" + selCss();
+    watchFactorEl.onchange = () => {
+      WATCH.factor = Math.min(100, Math.max(1, Math.round(Number(watchFactorEl.value) || 21)));
+      watchFactorEl.value = String(WATCH.factor);
+      saveWatch();
+      render();
+    };
+
+    watchArmEl = btn("Arm watch", () => watchArm(), "background:#26364f;color:#dce8f8;");
+    watchStatusEl = document.createElement("div");
+    watchStatusEl.style.cssText = "color:#9fb3d1";
+
+    /** The console: one line per event, timestamped — "search running", what it
+     * found, what failed, when the next sweep is due. */
+    watchConsoleEl = document.createElement("div");
+    watchConsoleEl.style.cssText =
+      "grid-column:1/-1;height:96px;overflow:auto;background:#080d18;border:1px solid #22304a;" +
+      "border-radius:6px;padding:4px 6px;white-space:pre-wrap;color:#9fb3d1;font-size:11px;line-height:1.35";
+
+    /** The buy list: one button per listing, cheapest rax-per-rating first. */
+    watchCountEl = document.createElement("div");
+    watchCountEl.style.cssText =
+      "grid-column:1/-1;display:flex;gap:6px;align-items:center;color:#9fb3d1;padding-top:2px";
+    watchListEl = document.createElement("div");
+    watchListEl.style.cssText =
+      "grid-column:1/-1;display:flex;flex-direction:column;gap:3px;max-height:220px;overflow:auto";
+
+    const watchNote = document.createElement("div");
+    watchNote.style.cssText = "grid-column:1/-1;color:#7f93b0";
+    watchNote.textContent =
+      "Runs ONE of the chosen searches every random 8–11 min and keeps what clears the ceiling. " +
+      "Nothing is bid: a row opens that listing's buy screen in a new tab.";
 
     /** Loop row: run the selected Quick Search every N minutes off one rax
      * allowance. The allowance is a ceiling on rax *committed* (bids reserve
@@ -1869,10 +2275,19 @@
       "Runs the chosen lineups on a timer off one rax allowance. A bid that somebody outbids hands its " +
       "rax back once its 10-minute window has closed. Hard stops: allowance \u00b7 72 cycles \u00b7 24 h \u00b7 3 failed cycles \u00b7 STOP.";
 
-    cfg.append(tabBar, paneSetup, paneLoop);
+    cfg.append(tabBar, paneSetup, paneLoop, paneWatch);
     paneSetup.append(labeled("Quick Search"), quickEl, presetChipsEl,
-      labeled("Sport"), sportEl, labeled("Players"), playersEl, chipsEl, capsEl, liveEl);
+      labeled("Sport"), sportEl, labeled("Players"), playersEl, chipsEl,
+      labeled("Bid ceiling"), ceilWrap, capsEl, liveEl);
     paneLoop.append(loopNote, loopRow, loopEl);
+    paneWatch.append(watchNote,
+      labeled("Quick Search"), watchEl, watchChipsEl,
+      labeled("Extra players"), watchPlayersEl,
+      labeled("Their sport"), watchSportEl,
+      labeled("Watch ceiling"), watchFactorEl,
+      watchArmEl, watchStatusEl,
+      labeled("Console"), watchConsoleEl,
+      watchCountEl, watchListEl);
 
     quickEl.onchange = () => {
       hashPlan = null;   // a manual pick overrides a menu handoff
@@ -2044,11 +2459,115 @@
     return a > 240 ? `✓ ${Math.round(a / 60)}m old` : "✓";
   }
 
+  /** The searches the watch is carrying, as bubbles with their own × — same
+   * pattern as the bid run's lineup chips, kept separate on purpose so picking
+   * something to watch never edits what the next bid run would buy. */
+  function renderWatchChips() {
+    if (!watchChipsEl) return;
+    watchChipsEl.textContent = "";
+    const ps = watchPresets();
+    if (!ps.length) { watchChipsEl.style.display = "none"; return; }
+    watchChipsEl.style.display = "flex";
+    for (const p of ps) {
+      const chip = document.createElement("span");
+      chip.style.cssText = "display:inline-flex;align-items:center;gap:3px;padding:1px 2px 1px 8px;" +
+        "border-radius:999px;border:1px solid #3a5a8a;background:#152744;color:#dbe9ff";
+      const nm = document.createElement("span");
+      nm.textContent = p.label;
+      const x = document.createElement("button");
+      x.type = "button";
+      x.textContent = "\u00d7";
+      x.title = `stop watching ${p.label}`;
+      x.setAttribute("aria-label", `remove ${p.label}`);
+      x.style.cssText =
+        "background:none;border:0;color:inherit;cursor:pointer;font:inherit;padding:0 4px;line-height:1.1";
+      x.onclick = () => {
+        WATCH.presetIds = WATCH.presetIds.filter((id) => id !== p.id);
+        saveWatch();
+        render();
+      };
+      chip.append(nm, x);
+      watchChipsEl.appendChild(chip);
+    }
+  }
+
+  /** One listing → the button that opens its buy screen. The row carries what
+   * the decision needs (price, rax/rating, rarity, how it is priced, how long is
+   * left); the click is the only thing that can spend. */
+  function watchRow(r) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.style.cssText = "display:flex;gap:8px;align-items:center;width:100%;text-align:left;" +
+      "background:#122036;color:#cfe0f7;border:1px solid #2f4a72;border-radius:6px;" +
+      "padding:3px 7px;cursor:pointer;font:inherit;font-size:11px";
+    const left = document.createElement("span");
+    left.style.flex = "1";
+    left.textContent = `${SPORT_LABEL[r.sport] || r.sport} \u00b7 ${r.player} \u00b7 ` +
+      `${RARITY_LABEL[r.rarity] || `r${r.rarity}`} \u00b7 ${fmtRax(r.price)} rax ` +
+      `(${fmtR(r.rpr)} rpr \u00b7 rating ${fmtR(r.rating)})`;
+    const right = document.createElement("span");
+    right.style.cssText = "color:#8fb0dd;white-space:nowrap";
+    right.textContent = [r.how, timeLeft(r.endsAt)].filter(Boolean).join(" \u00b7 ");
+    row.title = `open #${r.listingId} in a new tab — the buy screen for this listing`;
+    row.append(left, right);
+    row.onclick = () => {
+      WATCH.last = r.listingId;
+      wlog(`opened ${r.player} #${r.listingId} (${fmtRax(r.price)} rax) — buy screen in a new tab`);
+      render();
+      window.open(r.url, "_blank", "noopener,noreferrer");
+    };
+    return row;
+  }
+
+  /** The watch pane: status, console, and the list. The console and the list are
+   * only rebuilt when they actually changed — render() runs once a second and
+   * rebuilding eighty buttons on every tick is how a panel starts to stutter. */
+  function renderWatch() {
+    if (!watchListEl) return;
+    const picks = watchPresets();
+    const names = picks.map((p) => p.label).join(" + ");
+    const next = WATCH.on && WATCH.nextAt
+      ? Math.max(1, Math.ceil((WATCH.nextAt - Date.now()) / 60000)) : null;
+    watchStatusEl.textContent = (WATCH.on ? "watch: ON" : "watch: off") +
+      ` \u00b7 ${names || "typed players"}` +
+      (WATCH.extra.length ? ` + ${WATCH.extra.length} typed` : "") +
+      ` \u00b7 \u00d7${WATCH.factor} \u00b7 ${WATCH.results.length} on the list` +
+      (WATCH.on ? ` \u00b7 cycle ${WATCH.cycle}` + (next ? ` \u00b7 next in ${next} min` : "") : "");
+    if (watchArmEl) {
+      watchArmEl.textContent = WATCH.on ? "Disarm watch" : "Arm watch";
+      watchArmEl.style.background = WATCH.on ? "#3b2233" : "#26364f";
+    }
+    if (watchLogRendered !== WATCH.logLines.length) {
+      watchLogRendered = WATCH.logLines.length;
+      watchConsoleEl.textContent = WATCH.logLines.join("\n");
+      watchConsoleEl.scrollTop = watchConsoleEl.scrollHeight;
+    }
+    if (watchRendered === watchDirty) return;
+    watchRendered = watchDirty;
+    watchCountEl.textContent = "";
+    const head = document.createElement("span");
+    head.style.flex = "1";
+    const n = WATCH.results.length;
+    head.textContent = n
+      ? `${n} listing(s) \u2014 cheapest rax/rating first`
+      : "nothing on the list yet";
+    watchCountEl.append(head, btn("Clear list", () => {
+      WATCH.results = [];
+      watchDirty++;
+      saveWatch();
+      render();
+    }, "font-size:11px;padding:2px 8px;"));
+    watchListEl.textContent = "";
+    for (const r of WATCH.results) watchListEl.appendChild(watchRow(r));
+  }
+
   function render() {
     if (!panel || !panel.isConnected) return;
     DEFAULTS.maxRpr = effectiveMaxRpr();
     renderChips();
     renderPresetChips();
+    renderWatchChips();
+    renderWatch();
     const age = S.lastAt ? Math.round((Date.now() - S.lastAt) / 1000) : null;
     statusEl.textContent =
       `maxRpr ${DEFAULTS.maxRpr} · maxCards ${DEFAULTS.maxCards} · maxSpend ${DEFAULTS.maxSpend} rax\n` +
@@ -2061,6 +2580,11 @@
       ? ` (${Object.entries(pc).map(([n, c]) => `${n} ${c}`).join(", ")})`
       : "";
     capsEl.textContent = `caps: ${DEFAULTS.maxRpr} rax/rating${pcTxt} · ≤${DEFAULTS.maxCards} cards · ≤${DEFAULTS.maxSpend} rax`;
+    if (ceilEl && document.activeElement !== ceilEl) ceilEl.value = String(DEFAULTS.maxRpr);
+    if (watchFactorEl && document.activeElement !== watchFactorEl) watchFactorEl.value = String(WATCH.factor);
+    if (watchSportEl && document.activeElement !== watchSportEl) watchSportEl.value = WATCH.sport;
+    if (watchPlayersEl && document.activeElement !== watchPlayersEl)
+      watchPlayersEl.value = WATCH.extra.join(", ");
     if (loopEl) loopEl.textContent = loopStatus();
     if (loopBtnEl) {
       loopBtnEl.textContent = LOOP.on ? "Disarm loop" : "Arm loop";
@@ -2083,6 +2607,7 @@
     if (!document.body) { setTimeout(boot, 300); return; }
     if (!panel) buildPanel();
     if (!loopResumed) { loopResumed = true; resumeLoop(); }
+    if (!watchResumed) { watchResumed = true; watchResume(); }
     if (!selfTestOk && !S.log.some((l) => l.includes("SELF-TEST"))) {
       S.log.unshift("SELF-TEST FAILED — the request-token encoder is wrong, every call will 401 as \"Malformed request\".");
       render();

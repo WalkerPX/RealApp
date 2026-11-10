@@ -95,8 +95,8 @@ Two ways in:
 
 - **Walkr's Menu → Autobid → "Bid <lineup>"** — the lineup and the caps ride in
   the URL hash (`#walkr=<base64url>`), and the panel shows *from Walkr's Menu*.
-- **Standalone** — pick a **Quick Search** (the same lineups), or set
-  **Sport** (including `all`) + **Players**.
+- **Standalone** — pick one or more **Quick Searches** (the iOS app's own saved
+  searches, see below), or set **Sport** (including `all`) + **Players**.
 
 Flow: **Run** scans and caches the plan, spending nothing unless LIVE is ticked.
 Then **Bid these N (X rax)** fires *that cached plan* — no second scan. A plan
@@ -110,10 +110,11 @@ Choosing a lineup — or touching Sport/Players — clears every exclusion, so t
 preset is never edited. A slice whose players are all dropped disappears
 entirely rather than falling back to a whole-market sweep.
 
-The panel is split into two tabs: **Search** (Quick Search, Sport, Players) and
-**Loop** (the cadence, the allowance and the primer). The search is the part that
-changes between runs; the loop is a set-once thing, and side by side they made
-the panel noisy.
+The panel is split into three tabs: **Search** (Quick Search, Sport, Players, the
+bid ceiling), **Loop** (the cadence, the allowance and the primer) and
+**Consistent** (the watcher — see below). The search is the part that changes
+between runs, the loop is a set-once thing, and the watcher is a different job
+entirely; side by side they made the panel noisy.
 
 **Quick Search is a dropdown that adds.** Pick a lineup and it becomes a bubble
 under the dropdown; pick another and both run off the one allowance. Each bubble
@@ -149,33 +150,79 @@ panel** (this script's `SCRIPT_CAPS`) or **from Walkr's Menu** (the URL hash). A
 menu page built before a cap change sends the old number, so the script compares
 the two and says so rather than letting it look like the cap failed to update.
 
-### The preset block is generated
+### The preset block is the iOS app's saved searches
 
 `const PRESETS` is baked in — the userscript runs on realapp.com and can't import
-`lib/`. Regenerate it after a budget sweep or a daily-pack edit:
+`lib/`, and it can't read the app's `AsyncStorage` either. The list is therefore
+**exactly the saved Quick Searches from the iOS app**: the Made tweak mirrors
+them to the IPA host (`/ipa/menu/quick`, because a sideload update wipes the app
+container), and that mirror is what gets baked in. Regenerate after editing them
+in the app:
 
 ```
-node scripts/autobid/export_presets.mjs
+QUICK_USER=walkr QUICK_TOKEN=… node scripts/autobid/export_quick.mjs
+node scripts/autobid/export_quick.mjs --file /tmp/quick.json   # offline
 ```
 
-It reads `BUDGET_SEARCH_PRESETS` (lib/budget-searches.ts), `MAX_SEARCH_PRESETS`
-(lib/max-searches.ts), `SETUP_SEARCH_PRESETS` (lib/setup-searches.ts),
-`DAILY_PACK_PRESETS` (lib/daily-pack-searches.ts) and `LOW_PERRAX_SLICES`
-(lib/deals.ts), so the dropdown and Walkr's Menu can't drift apart. Optimal MAX
-and Optimal Setup presets carry `maxRpr` parsed straight out of `MAX_SEARCH_FACTOR`
-/ `SETUP_SEARCH_FACTOR` (21), the same ceiling the shop menu screens them at —
-without it the extension fell back to `SCRIPT_CAPS.maxRpr` (11) and the panel
-quoted 11 for a lineup the menu had searched at 21.
+The old generated families (Optimal Budget / MAX / Setup, Daily Pack Buys, Low
+PerRax) are gone with them — `scripts/autobid/export_presets.mjs` is deleted, and
+those `lib/*-searches.ts` files now only feed Walkr's Menu. Nothing reads the old
+labels, so a Menu handoff still bids its own `targets`; it simply won't find
+per-player caps by name any more, because no baked search ships any.
+
+A saved search is a nickname plus a player list sliced by sport/season — that is
+all the app stores (its deal screen's factor, rarities and listing types are
+global state, not part of the entry). So each one becomes `slices`, the shape
+`scan()` already walks, and carries `maxRpr: 21` because **21 is the app's
+default factor**. A search that spans sports (Farm-Mens BB is CBB + NBA) becomes
+several slices, which is exactly why the preset is a list.
+
+### The factor is a field now
+
+The deal screen's *"price under factor × the card's own rating"* is the panel's
+**Bid ceiling** field: it overrides whatever the chosen searches carry, it is
+remembered in `localStorage` (`walkr.autobid.factor.v1`), and **follow searches**
+puts it back to "whatever the lineups say". The hard rails are unchanged —
+`maxCards` 50 and `maxSpend` 1000 rax per run — so a loosened factor still can't
+run away.
+
+### The Consistent tab — watch, don't bid
+
+The third tab is a market watcher, and it is deliberately **not** a bidder.
+
+- Pick one or more Quick Searches (bubbles with their own ×), optionally type
+  **extra players** — they ride on every sport/season the chosen searches already
+  cover, or on the sport picked beside them when there is no search (`auto`
+  can't inherit from nothing, so that combination refuses to arm).
+- **Arm watch** runs one search immediately, then **one search every random
+  8–11 minutes**. With several selected the pick is random each cycle, so they
+  share the one steady cadence instead of firing together.
+- The **console** is a timestamped line per event: which search is running, how
+  many live listings it found at the ceiling, what failed, and when the next
+  sweep is due.
+- The **list** is one button per listing — cheapest rax/rating first — showing
+  sport, player, rarity, price, rpr, rating, whether it is priced *buy now* or
+  *auction*, and how long is left. Clicking a row opens that listing's buy screen
+  **in a new tab**, so the watch tab keeps ticking. Nothing is ever bid; the row
+  click is the only thing that spends rax.
+- Its ceiling is its own (`Watch ceiling`, default 21) and it is applied through
+  `scanCeiling` for that one scan, so it can't leak into a bid run. It never
+  needs a Turnstile token — reads don't carry one.
+- The list prunes ended auctions on every cycle, dedupes by listing id, and caps
+  at 80 rows. State (armed flag, selections, ceiling, list, console, next sweep)
+  lives in `localStorage["walkr.autobid.watch.v1"]` and resumes after a reload
+  without re-firing instantly.
 
 ### Per-preset rax/rating ceilings
 
-A preset may carry its own `maxRpr`. The **Daily Pack Buys** presets ship
-`maxRpr: 21`: a player pack costs 200 rax for ~10 rating (**20 rax per rating**),
-so a marketplace listing at or under 21 rpr is cheaper fuel than the pack itself.
-`effectiveMaxRpr()` resolves the ceiling per run — menu handoff → preset's own →
-`SCRIPT_CAPS` — and `render()` re-derives it, so picking a daily-pack preset and
-then switching to something else can't leave 21 behind. `PRESET_CEILINGS` keeps a
-handoff quoting 21 from tripping the stale-menu drift note.
+A preset may carry its own `maxRpr`, and every baked iOS search does — **21**, the
+app's default factor, which is also roughly the pack rate (200 rax for ~10
+rating = 20 rpr) so a listing at or under it is cheaper fuel than a pack.
+`effectiveMaxRpr()` resolves the ceiling per run — menu handoff → the panel's
+**Bid ceiling** field → the presets' own (only when *every* selected search
+declares one) → `SCRIPT_CAPS` (11) — and `render()` re-derives it, so switching
+searches can't leave a loosened number behind. `PRESET_CEILINGS` keeps a handoff
+quoting 21 from tripping the stale-menu drift note.
 
 ### The loop — unattended cycles off one allowance
 
@@ -253,15 +300,22 @@ only signal that survives:
 every leaf mentioning buy/bid/offer/rax — that is what to send if the primer logs
 `no bid control found`.
 
-Three jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
-loop, `primer.cjs` for the primer, `reconcile.cjs` for the allowance): dry-run
+Four jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
+loop, `primer.cjs` for the primer, `reconcile.cjs` for the allowance, `watch.cjs`
+for the Consistent tab): dry-run
 plans and spends nothing, a small allowance refuses to bid, LIVE bids at the
 buy-now price and debits the balance card by card, a fully-committed allowance
 stops spending but keeps watching while a bid is still inside its window, the
 cadence lands inside `[min, max]`, an aged bid that was **outbid** refunds its
 rax while one whose listing **vanished** stays spent, and the primer
 finds/clicks a div-based `Buy Now` **before** a second-ranked `Bid`, exactly
-once, while ignoring a non-matching pointer div and its own panel.
+once, while ignoring a non-matching pointer div and its own panel. The watch
+suite adds: the dropdown is the iOS list (and the old families are gone), three
+tabs exist, a bid-run pick can't edit what is being watched, arming runs one
+search at the watch ceiling and **bids nothing**, the list is buttons carrying
+both buy-now and auction-only listings while dropping the over-ceiling one, a row
+click opens `realapp.com/<route>` in a new tab, and Disarm stops the timer while
+the list survives.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
 preset's id and the next-cycle timestamp — the primer reloads the page, and
