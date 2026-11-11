@@ -225,18 +225,23 @@ The third tab is a market watcher, and it is deliberately **not** a bidder.
 - The **console** is a timestamped line per event: which search is running, how
   many live listings it found at the ceiling, what failed, and when the next
   sweep is due.
-- The **list** is one button per listing — cheapest rax/rating first — showing
-  sport, player, rarity, price, rpr, rating, whether it is priced *buy now* or
-  *auction*, and how long is left. Clicking a row opens that listing's buy screen
-  **in a new tab**, so the watch tab keeps ticking. Nothing is ever bid; the row
-  click is the only thing that spends rax.
+- The **list** is grouped by the scan that found each card — **newest batch on
+  top, best rax/rating first inside it** — with a muted `scan 14:32 · 3 cards`
+  header per batch. Each row shows sport, player, rarity, price, rpr, rating,
+  whether it is priced *buy now* or *auction*, and how long is left. Clicking a
+  row opens that listing's buy screen **in a new tab**, so the watch tab keeps
+  ticking, and the row (in both the panel and the pop-out) takes a **purple
+  outline** to mark it as already opened — persisted in `WATCH.seen`, so a reload
+  keeps it, and cleared by *Clear list* or by re-arming. Nothing is ever bid; the
+  row click is the only thing that spends rax.
 - Its ceiling is its own (`Watch ceiling`, default 21) and it is applied through
   `scanCeiling` for that one scan, so it can't leak into a bid run. It never
   needs a Turnstile token — reads don't carry one.
 - **Pop out list** mirrors the list into its own small window (dark, same rows,
-  same order, each a plain link) for a second monitor; the button becomes **Close
-  window** while it is open. Read-only on purpose — arming, adding and clearing
-  stay in the panel, so nothing in that window can spend by itself.
+  same batch grouping and order) for a second monitor; the button becomes **Close
+  window** while it is open. Each row is a plain link, so nothing in that window
+  can spend by itself — but a click tells the panel, which is what paints the
+  purple outline.
 - The list prunes ended auctions on every cycle, dedupes by listing id, and caps
   at 80 rows. State (armed flag, selections, ceiling, list, console, every
   search's clock, and the last breather) lives in
@@ -331,9 +336,10 @@ only signal that survives:
 every leaf mentioning buy/bid/offer/rax — that is what to send if the primer logs
 `no bid control found`.
 
-Five jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
+Seven jsdom suites cover this headlessly (`/tmp/walkr-test/`: `run.cjs` for the
 loop, `primer.cjs` for the primer, `reconcile.cjs` for the allowance, `watch.cjs`
-for the Consistent tab, `stagger.cjs` for its schedule): dry-run
+for the Consistent tab, `stagger.cjs` for its schedule, `firstpass.cjs` for the
+arming sweep, `batch.cjs` for the list order): dry-run
 plans and spends nothing, a small allowance refuses to bid, LIVE bids at the
 buy-now price and debits the balance card by card, a fully-committed allowance
 stops spending but keeps watching while a bid is still inside its window, the
@@ -349,7 +355,10 @@ click opens `realapp.com/<route>` in a new tab, the pop-out window carries the
 same rows as links, and Disarm stops the timer while the list survives. The
 stagger suite seeds two searches 25 s and 5 min out, reloads, and proves only the
 due one ran, the other search's clock was untouched, the runner put itself back
-7 minutes out, and nothing overlapped.
+7 minutes out, and nothing overlapped. The batch suite seeds two scans' worth of
+cards and proves the newest scan reads first, best-value-first inside each scan,
+and that opening a card from the pop-out paints it purple — and that the outline
+survives the re-render caused by the next click.
 
 Loop state lives in `localStorage["walkr.autobid.loop.v1"]`, including the armed
 preset's id and the next-cycle timestamp — the primer reloads the page, and

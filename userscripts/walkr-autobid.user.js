@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Walkr Autobid
 // @namespace    walkr.realapp
-// @version      0.7.3
+// @version      0.7.4
 // @description  Bids the buy-now trigger price on Real marketplace listings that clear a rax-per-rating ceiling, and watches the same searches on a timer to hand back a buy list. Dry-run by default. Hard caps. Kill switch.
 // @author       walkr
 // @updateURL    https://raw.githubusercontent.com/WalkerPX/RealApp/main/userscripts/walkr-autobid.user.js
@@ -121,7 +121,7 @@
    * when it is available, and the literal is the fallback for the managers that
    * hide GM_info. Bump the literal with @version on every release. */
   const RUNNING_VERSION = (typeof GM_info !== "undefined" && GM_info &&
-    GM_info.script && GM_info.script.version) || "0.7.3";
+    GM_info.script && GM_info.script.version) || "0.7.4";
 
   /** This script's own caps. A Walkr's Menu handoff can override them via the
    * URL, and a menu built before a cap change would quietly send the old number
@@ -1781,6 +1781,12 @@
      * due searches runs one at a time instead of back to back. */
     lastEndAt: 0,
     breathMs: 0,
+    /** A counter bumped by every merge, so rows can be grouped by the scan that
+     * found them — newest batch first, best value inside it. */
+    batch: 0,
+    /** Listing ids already opened from the list. Purple outline, and it survives
+     * a reload: opening the same card twice is a wasted trip. */
+    seen: [],
     lastSearch: "",
     timer: null,
   };
@@ -1799,6 +1805,7 @@
         logLines: WATCH.logLines.slice(-120), cycle: WATCH.cycle, nextAt: WATCH.nextAt,
         next: WATCH.next, lastEndAt: WATCH.lastEndAt, breathMs: WATCH.breathMs,
         intervalMin: WATCH.intervalMin, intervalMax: WATCH.intervalMax, pass: WATCH.pass,
+        batch: WATCH.batch, seen: WATCH.seen,
       }));
     } catch (_) {}
   }
@@ -1920,6 +1927,44 @@
   /** Run one search, then put its own clock forward and hand the tick back. The
    * `finally` is the invariant that matters: `phase` is cleared and the next
    * tick is armed even if the scan threw. */
+  /** Opened from the list — the row goes purple and stays purple. Persisted, so
+   * the marker survives the reload that following errands usually needs. */
+  function markSeen(id) {
+    if (id == null) return;
+    if (WATCH.seen.includes(id)) return;
+    WATCH.seen.push(id);
+    watchDirty++;
+    saveWatch();
+    render();
+  }
+  // The pop-out lives in its own window; it can only reach the state through
+  // the opener, so leave a door open for it.
+  try { window.__walkrWatchSeen = markSeen; } catch (_) {}
+
+  /** Rows grouped by the scan that found them: newest batch first, and best
+   * rax-per-rating first inside each batch. That is the order a sweep reads in —
+   * "what just appeared" before "what was always there, cheapest". */
+  function watchGroups() {
+    const byBatch = new Map();
+    for (const r of WATCH.results) {
+      const b = Number(r.batch) || 0;
+      if (!byBatch.has(b)) byBatch.set(b, []);
+      byBatch.get(b).push(r);
+    }
+    return [...byBatch.keys()]
+      .sort((a, b) => b - a)
+      .map((batch) => {
+        const rows = byBatch.get(batch).slice().sort((x, y) => x.rpr - y.rpr);
+        const at = rows.reduce((t, r) => Math.min(t, Number(r.seenAt) || Infinity), Infinity);
+        return { batch, rows, at: Number.isFinite(at) ? at : 0 };
+      });
+  }
+  const batchLabel = (g) => {
+    const t = g.at ? new Date(g.at) : null;
+    const when = t ? t.toLocaleTimeString("en-GB", { hour12: false }) : "earlier";
+    return `scan ${when} \u00b7 ${g.rows.length} card${g.rows.length === 1 ? "" : "s"}`;
+  };
+
   async function watchRun(entry) {
     WATCH.phase = "running";
     WATCH.cycle++;
@@ -1985,9 +2030,10 @@
     const now = Date.now();
     const keep = WATCH.results.filter((r) => !(r.endsAt && Date.parse(r.endsAt) <= now));
     let added = 0;
+    WATCH.batch = (Number(WATCH.batch) || 0) + 1;
     for (const f of found) {
       if (keep.some((r) => r.listingId === f.listingId)) continue;
-      keep.push({ ...f, seenAt: now });
+      keep.push({ ...f, seenAt: now, batch: WATCH.batch });
       added++;
     }
     keep.sort((a, b) => a.rpr - b.rpr);
@@ -2013,6 +2059,8 @@
     WATCH.on = true;
     WATCH.cycle = 0;
     WATCH.results = [];
+    WATCH.seen = [];
+    WATCH.batch = 0;
     WATCH.logLines = [];
     WATCH.phase = "idle";
     WATCH.lastEndAt = 0;
@@ -2049,6 +2097,8 @@
     WATCH.logLines = Array.isArray(s.logLines) ? s.logLines : [];
     WATCH.cycle = Number(s.cycle) || 0;
     WATCH.next = s.next && typeof s.next === "object" ? { ...s.next } : {};
+    WATCH.batch = Number(s.batch) || 0;
+    WATCH.seen = Array.isArray(s.seen) ? s.seen.map(Number).filter((n) => Number.isFinite(n)) : [];
     WATCH.intervalMin = Number(s.intervalMin) || WATCH_CAPS.defaultIntervalMin;
     WATCH.intervalMax = Number(s.intervalMax) || WATCH_CAPS.defaultIntervalMax;
     WATCH.pass = Array.isArray(s.pass) ? s.pass : [];
@@ -2727,10 +2777,17 @@
     const right = document.createElement("span");
     right.style.cssText = "color:#8fb0dd;white-space:nowrap";
     right.textContent = [r.how, timeLeft(r.endsAt)].filter(Boolean).join(" \u00b7 ");
-    row.title = `open #${r.listingId} in a new tab — the buy screen for this listing`;
+    const seen = WATCH.seen.includes(r.listingId);
+    if (seen) {
+      row.style.borderColor = "#a855f7";
+      row.style.boxShadow = "inset 0 0 0 1px #a855f7";
+    }
+    row.title = `open #${r.listingId} in a new tab — the buy screen for this listing` +
+      (seen ? " (already opened)" : "");
     row.append(left, right);
     row.onclick = () => {
       WATCH.last = r.listingId;
+      markSeen(r.listingId);
       wlog(`opened ${r.player} #${r.listingId} (${fmtRax(r.price)} rax) — buy screen in a new tab`);
       render();
       window.open(r.url, "_blank", "noopener,noreferrer");
@@ -2752,14 +2809,22 @@
     let doc;
     try { doc = listWin.document; } catch (_) { listWin = null; return; }
     if (!doc || !doc.body) return;
-    const rows = WATCH.results.map((r) => {
-      const left = escHtml(
-        `${SPORT_LABEL[r.sport] || r.sport} \u00b7 ${r.player} \u00b7 ` +
-        `${RARITY_LABEL[r.rarity] || `r${r.rarity}`} \u00b7 ${fmtRax(r.price)} rax ` +
-        `(${fmtR(r.rpr)} rpr \u00b7 rating ${fmtR(r.rating)})`);
-      const right = escHtml([r.how, timeLeft(r.endsAt)].filter(Boolean).join(" \u00b7 "));
-      return `<a class="row" href="${escHtml(r.url)}" target="_blank" rel="noopener noreferrer">` +
-        `<span class="l">${left}</span><span class="r">${right}</span></a>`;
+    // Grouped by the scan that found them — newest batch on top, best value
+    // first inside it, so a fresh sweep reads before the older stock.
+    const rows = watchGroups().map((g) => {
+      const head = `<div class="group">${escHtml(batchLabel(g))}</div>`;
+      const body = g.rows.map((r) => {
+        const left = escHtml(
+          `${SPORT_LABEL[r.sport] || r.sport} \u00b7 ${r.player} \u00b7 ` +
+          `${RARITY_LABEL[r.rarity] || `r${r.rarity}`} \u00b7 ${fmtRax(r.price)} rax ` +
+          `(${fmtR(r.rpr)} rpr \u00b7 rating ${fmtR(r.rating)})`);
+        const right = escHtml([r.how, timeLeft(r.endsAt)].filter(Boolean).join(" \u00b7 "));
+        const seen = WATCH.seen.includes(r.listingId);
+        return `<a class="row${seen ? " seen" : ""}" data-id="${escHtml(r.listingId)}"` +
+          ` href="${escHtml(r.url)}" target="_blank" rel="noopener noreferrer">` +
+          `<span class="l">${left}</span><span class="r">${right}</span></a>`;
+      }).join("");
+      return head + body;
     }).join("");
     doc.title = `Walkr watch \u00b7 ${WATCH.results.length}`;
     doc.body.innerHTML =
@@ -2775,6 +2840,8 @@
           background:#122036;border:1px solid #2f4a72;color:#cfe0f7;text-decoration:none}
         .row:hover{border-color:#4a7ab8;background:#16294a}
         .l{flex:1}.r{color:#8fb0dd;white-space:nowrap;font-size:11px}
+        .group{color:#7f93b0;font-size:10.5px;letter-spacing:.03em;padding:6px 2px 0}
+        .row.seen{border-color:#a855f7;box-shadow:inset 0 0 0 1px #a855f7}
         .empty{color:#7f93b0;padding:10px 2px}
         footer{color:#5d6f8a;font-size:11px;padding:0 12px 12px}
       </style>
@@ -2782,8 +2849,25 @@
         <span class="meta">${WATCH.on ? "watching" : "disarmed"} \u00b7
         ${hhmmss()}</span></header>
       <main>${rows || '<div class="empty">nothing on the list yet</div>'}</main>
-      <footer>Click a row to open its buy screen in a new tab. The list is managed
-        in the Walkr Autobid panel.</footer>`;
+      <footer>Click a row to open its buy screen in a new tab \u2014 opened rows get
+        a purple outline. The list is managed in the Walkr Autobid panel.</footer>`;
+    // innerHTML can't run a script, so the mark-as-opened listener is attached
+    // here: the row goes purple at once, and the panel is told so the outline
+    // (and a reload) keeps it.
+    for (const a of doc.querySelectorAll("a.row")) {
+      a.addEventListener("click", () => {
+        const id = Number(a.getAttribute("data-id"));
+        a.classList.add("seen");
+        // Let the new tab open before the parent re-renders this document —
+        // rewriting the body inside the click can eat the default action.
+        setTimeout(() => {
+          try {
+            const op = (listWin && listWin.opener) || window;
+            if (op && typeof op.__walkrWatchSeen === "function") op.__walkrWatchSeen(id);
+          } catch (_) {}
+        }, 0);
+      });
+    }
   }
 
   function watchPopOut() {
@@ -2859,7 +2943,13 @@
       render();
     }, "font-size:11px;padding:2px 8px;"));
     watchListEl.textContent = "";
-    for (const r of WATCH.results) watchListEl.appendChild(watchRow(r));
+    for (const g of watchGroups()) {
+      const head = document.createElement("div");
+      head.textContent = batchLabel(g);
+      head.style.cssText = "color:#7f93b0;font-size:10px;padding:3px 2px 1px;letter-spacing:.02em";
+      watchListEl.appendChild(head);
+      for (const r of g.rows) watchListEl.appendChild(watchRow(r));
+    }
     renderListWindow();
   }
 
