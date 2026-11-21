@@ -25,14 +25,14 @@ import {
 // The route declares maxDuration = 60 (Vercel Pro/fluid), so a scan may run
 // long — this cap stays clear of it. Each slice is its own request, so a
 // multi-sport sweep is bounded by slices × this budget, not by one call.
-const MAX_ELAPSED_MS = 45_000;
+const MAX_ELAPSED_MS = 50_000;
 const MAX_LOOKUPS = 130; // FMV + earnings lookups per scan (~3/s of the budget)
 // Sequential requests only (never parallel): a rate-limit hit on Real is
 // sticky, so a small floor between requests keeps volume polite over a long
 // scan. The gap is jittered — a fixed millisecond metronome is itself a bot
 // fingerprint, and no real browser fetches at a perfectly constant cadence.
-const GAP_MIN_MS = 140;
-const GAP_MAX_MS = 420;
+const GAP_MIN_MS = 80;
+const GAP_MAX_MS = 220;
 const gap = () =>
   GAP_MIN_MS + Math.floor(Math.random() * (GAP_MAX_MS - GAP_MIN_MS + 1));
 
@@ -192,12 +192,39 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
   };
 
   if (playerIds.length) {
-    // Player-scoped path: every rarity/type for each resolved player, one
-    // request per combination (Real returns that player's full set, so there
-    // is nothing to page).
-    outer: for (const ltype of f.listingTypes) {
-      for (const rarity of f.rarities) {
-        for (const pid of playerIds) {
+    // Player-scoped path, ordered player → type → rarity so a single player is
+    // finished before the next one starts. Real answers one player/type with
+    // its full spread, so a rarity-less request both lists that player's cards
+    // and tells us whether the combination is worth any rarity requests at
+    // all — without it, a type the player doesn't deal in (CBB: no bulk
+    // passes) burns the whole time budget returning zeros.
+    outer: for (const pid of playerIds) {
+      for (const ltype of f.listingTypes) {
+        if (over()) break outer;
+        let probe;
+        try {
+          probe = await fetchPlayerListings({
+            sport: f.sport,
+            season: f.season,
+            listingType: ltype,
+            playerId: pid,
+            entityType: filterEntityType,
+          });
+        } catch (e) {
+          if (e instanceof Error && seasonErrorMessage(e.message)) throw e;
+          continue;
+        }
+        if (!probe.listings.length) continue; // nothing here — skip this player/type
+        // The probe page is a real page: screen it, then walk the rarities.
+        scanned += probe.listings.length;
+        for (const l of probe.listings) {
+          if (f.rarities.includes(l.rarity)) await consider(l, true, ltype);
+        }
+        // Real caps a page at 10 and ignores offset/limit, so a small count
+        // means the probe already saw everything this player has in the type.
+        if (probe.listingCount <= probe.listings.length) continue;
+        await sleep(gap());
+        for (const rarity of f.rarities) {
           if (over()) break outer;
           let page;
           try {
@@ -212,6 +239,10 @@ export async function scanDeals(f: DealFilters): Promise<DealsResult> {
           } catch (e) {
             if (e instanceof Error && seasonErrorMessage(e.message)) throw e;
             continue; // bucket hiccup — try the next one
+          }
+          if (!page.listings.length) {
+            await sleep(gap());
+            continue;
           }
           scanned += page.listings.length;
           for (const l of page.listings) await consider(l, true, ltype);

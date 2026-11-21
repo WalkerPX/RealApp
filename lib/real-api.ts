@@ -427,7 +427,7 @@ export async function searchPlayerId(
 export async function fetchPlayerListings(params: {
   sport: string;
   season: number;
-  rarity: number;
+  rarity?: number;
   listingType: string;
   playerId: number;
   entityType?: string;
@@ -435,11 +435,13 @@ export async function fetchPlayerListings(params: {
   const q = new URLSearchParams({
     sport: params.sport,
     season: String(params.season),
-    rarity: String(params.rarity),
     listingType: params.listingType,
     filterEntityType: params.entityType ?? "player",
     filterEntityId: String(params.playerId),
   });
+  // Omit rarity to get the player's whole spread across rarities — one request
+  // that doubles as an emptiness probe for this player/type combination.
+  if (params.rarity != null) q.set("rarity", String(params.rarity));
   const d = await mktFetch<{ listings?: RawListing[]; listingCount?: number }>(
     `/cardmarketplacelistings?${q}`,
     LIVE
