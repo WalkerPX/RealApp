@@ -35,8 +35,9 @@ export const DEAL_SEASONS: Record<DealSport, number[]> = {
   ncaaf: [2026, 2025, 2024, 2023],
   // CBB is keyed by ENDING year: season param 2026 = the 2025-26 set (Real
   // stores CBB as "2025-26" cards; cf. ncaaf which is starting-year 2026 =
-  // 2026-27). 2026-27 (param 2027) has no cards yet — verified 0 listings.
-  ncaam: [2026, 2025, 2024],
+  // 2026-27). 2027 = the 2026-27 set, live now — verified 6 legendary bulk
+  // listings on 2026-11-17 (the earlier "no cards yet" note was pre-season).
+  ncaam: [2027, 2026, 2025, 2024],
   // NFL keys by STARTING year; 2026 is the live season (59 legendary bulk +
   // 614 play listings), 2025/2024/2023 are complete.
   nfl: [2026, 2025, 2024, 2023],
@@ -58,6 +59,7 @@ export const CURRENT_SEASONS: Partial<Record<DealSport, number>> = {
   mlb: 2026,
   wnba: 2026,
   ncaaf: 2026,
+  ncaam: 2027,
   nhl: 2026,
   nba: 2027,
   nfl: 2026,
